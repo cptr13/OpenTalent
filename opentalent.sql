@@ -1,0 +1,1 @@
+-- SQL schema including sample data for candidates and jobs
