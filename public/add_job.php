@@ -1,44 +1,44 @@
 <?php
-require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/header.php';
+require_once '../config/database.php';
+require_once '../includes/header.php';
 
-// Fetch clients for dropdown
-$clients = $pdo->query("SELECT id, name FROM clients ORDER BY name ASC")->fetchAll();
+// Load clients for dropdown
+$clients = $pdo->query("SELECT id, name FROM clients ORDER BY name")->fetchAll();
 
-// Handle optional preselected client
 $preselected_client_id = $_GET['client_id'] ?? null;
-
-$success = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $title = trim($_POST['title'] ?? '');
     $description = trim($_POST['description'] ?? '');
-    $status = trim($_POST['status'] ?? 'Open');
+    $location = trim($_POST['location'] ?? '');
     $client_id = $_POST['client_id'] ?? null;
+    $status = trim($_POST['status'] ?? 'Open');
 
-    $stmt = $pdo->prepare("INSERT INTO jobs (title, description, status, client_id) VALUES (?, ?, ?, ?)");
-    $stmt->execute([$title, $description, $status, $client_id]);
-
-    $success = true;
+    try {
+        $stmt = $pdo->prepare("INSERT INTO jobs (title, description, location, client_id, status) VALUES (?, ?, ?, ?, ?)");
+        $stmt->execute([$title, $description, $location, $client_id, $status]);
+        header('Location: jobs.php');
+        exit;
+    } catch (Exception $e) {
+        echo "<div class='alert alert-danger'>Error saving job: " . $e->getMessage() . "</div>";
+    }
 }
 ?>
 
-<h2 class="mb-4">Add New Job</h2>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Add New Job</h2>
+</div>
 
-<?php if ($success): ?>
-    <div class="alert alert-success">Job added successfully!</div>
-<?php endif; ?>
-
-<form method="post">
-    <div class="form-group">
-        <label>Job Title</label>
+<form method="POST">
+    <div class="mb-3">
+        <label class="form-label">Job Title</label>
         <input type="text" name="title" class="form-control" required>
     </div>
 
-    <div class="form-group">
-        <label>Client</label>
-        <select name="client_id" class="form-control">
-            <option value="">— No Client —</option>
+    <div class="mb-3">
+        <label class="form-label">Client</label>
+        <select name="client_id" class="form-control" required>
+            <option value="">-- Select Client --</option>
             <?php foreach ($clients as $client): ?>
                 <option value="<?= $client['id'] ?>" <?= $client['id'] == $preselected_client_id ? 'selected' : '' ?>>
                     <?= htmlspecialchars($client['name']) ?>
@@ -47,17 +47,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </select>
     </div>
 
-    <div class="form-group">
-        <label>Description</label>
-        <textarea name="description" class="form-control" rows="4"></textarea>
+    <div class="mb-3">
+        <label class="form-label">Location</label>
+        <input type="text" name="location" class="form-control">
     </div>
 
-    <div class="form-group">
-        <label>Status</label>
+    <div class="mb-3">
+        <label class="form-label">Description</label>
+        <textarea name="description" class="form-control" rows="5"></textarea>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Status</label>
         <select name="status" class="form-control">
             <option value="Open">Open</option>
-            <option value="Closed">Closed</option>
             <option value="On Hold">On Hold</option>
+            <option value="Closed">Closed</option>
+            <option value="Filled">Filled</option>
+            <option value="Cancelled">Cancelled</option>
         </select>
     </div>
 
@@ -65,4 +72,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <a href="jobs.php" class="btn btn-secondary">Cancel</a>
 </form>
 
-<?php require_once __DIR__ . '/../includes/footer.php'; ?>
+<?php require_once '../includes/footer.php'; ?>
+
