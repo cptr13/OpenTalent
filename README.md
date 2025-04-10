@@ -1,58 +1,54 @@
-# OpenTalent v1 – Open Source Applicant Tracking System
+# OpenTalent ATS (v0.6)
 
-**OpenTalent** is a lightweight, open-source ATS built for solo recruiters and small teams.  
-It’s fully self-hosted, runs on a LAMP stack, and designed for ease of setup on shared hosting platforms like A2 Hosting or GoDaddy.
-
----
-
-## 🚀 Features in v1
-
-- Login/logout authentication
-- Dashboard with stats
-- Add, view, and delete candidates and jobs
-- Upload and download resumes
-- Assign candidates to jobs
-- Activity notes per candidate/job
-- Basic database schema and admin account
+**OpenTalent** is a lightweight, self-hosted Applicant Tracking System (ATS) built for in-house and agency recruiters. It runs on a classic LAMP stack (PHP + MySQL) and is designed to be fast, private, and easy to extend — with no external API dependencies.
 
 ---
 
-## 🛠️ Installation
+## 🚀 v0.6 Highlights
 
-1. **Upload the files** to your server (e.g. into `public_html/OpenTalent`)
-2. **Create a MySQL database**
-3. **Import the `opentalent.sql`** file via phpMyAdmin
-4. **Edit `config/database.php`** and enter your DB credentials
-5. Go to `yourdomain.com/OpenTalent/public/login.php`
-
-> 🧪 Default Login:
-> - **Email:** `admin@example.com`  
-> - **Password:** `password`
+- 🔧 Bootstrap-styled UI across all major modules
+- 🧑‍💼 Clients Module: Add/edit/view clients and link jobs
+- 👤 Contacts Module: Manage individual people tied to clients
+- 🔍 View pages for candidates, jobs, clients, and contacts
+- 🧭 Navigation Bar updated for better UX
+- 🗑️ Delete functions added for candidates, jobs, clients, contacts, notes
+- 🔐 Password change and profile edit support
+- 📁 Codebase refactored for consistency, maintainability, and cleaner assign logic
 
 ---
 
-## 📄 File Structure
+## 🛠 Tech Stack
 
+- **Frontend**: HTML, Bootstrap 5, Vanilla JS
+- **Backend**: PHP 7/8
+- **Database**: MySQL or MariaDB
+- **Hosting**: Any LAMP stack (A2 Hosting recommended)
+
+---
+
+## 📦 Core Modules
+
+- **Candidates**: Add/edit/view candidates, assign to jobs
+- **Jobs**: Track job orders, associate with clients, view assignments
+- **Clients**: Manage companies, job orders, agreements, attachments
+- **Contacts**: Individual people tied to client companies
+- **Applications**: Candidate-job assignment records
+- **Notes**: Linked to candidates, jobs, clients, or contacts
+
+---
+
+## 🔮 See the Roadmap
+
+👉 [ROADMAP.md](./ROADMAP.md)
 
 ---
 
 ## ⚖️ License
 
-OpenTalent is released under the **MIT License**.  
-Use it, change it, resell it — totally up to you.
+OpenTalent is open-source under the **MIT License**.
 
 ---
 
-## 💡 Coming Soon
+## 🤝 Contributing
 
-- Resume parsing (open source only)
-- Email send/receive
-- Document generation (offer letters, onboarding)
-- Automation rules and workflows
-- Calendar scheduling integration
-
----
-
-Want to contribute later? GitHub repo coming soon.
-
-
+Contributions are welcome! Fork the repo, make your changes, and open a pull request.
