@@ -1,73 +1,67 @@
-# 🛣️ OpenTalent Roadmap
+# OpenTalent Development Roadmap
 
-OpenTalent is an open-source ATS built for real-world, practical recruiting.  
-This roadmap outlines planned features for future releases.
-
----
-
-## ✅ v1 – Core Release (Complete)
-
-- [x] Login/logout with basic session handling
-- [x] Dashboard with candidate/job/app counts
-- [x] Candidate CRUD (create, view, delete)
-- [x] Job CRUD
-- [x] Assign candidates to jobs
-- [x] Resume uploads and secure downloads
-- [x] Activity logs tied to candidates/jobs
-- [x] Sample SQL schema and demo data
-- [x] A2 Hosting-ready config
+This file outlines features planned and in progress for OpenTalent ATS.
 
 ---
 
-## 🔜 v2 – Next Milestone (Planned)
+## ✅ Completed (v0.6)
 
-### 📬 Email Integration
-- Send emails from inside OpenTalent via SMTP
-- IMAP connection to fetch and store replies
-- Auto-log emails to candidate/client records
+- Bootstrap 5 UI cleanup
+- Clients and Contacts modules
+- View pages for all record types
+- Navigation refactor
+- Assignments and record linking
+- Delete functionality for all core records
+- Change password and edit profile pages
+- Initial rebase and release tagging system
 
-### 📎 Resume Parsing (Self-Hosted Only)
+---
+
+## 🔄 In Progress — OpenTalent Dev Phase 2
+
+### 🔍 Universal Search (Global)
+- Top-of-page search bar
+- Searches across candidates, clients, jobs, contacts
+
+### 📊 Interactive Dashboard
+- Stats (Candidates, Jobs, Applications)
+- Clickable to filtered views
+
+### 📁 Document Generation (DOCX/PDF)
+- Generate offer letters, onboarding docs, agreements
+- Use PhpWord or TCPDF (open-source only)
+
+### 📥 Resume Parsing (Self-Hosted)
 - Extract name, email, phone, etc. from PDF/DOCX
-- Auto-fill candidate forms
-- Use only open-source, offline parsers
+- Auto-fill candidate records
+- No external APIs
 
-### ⚙️ Workflow Automation
-- Trigger actions: email, status changes, alerts
-- Examples: "send follow-up after 7 days of inactivity"
-- Fully configurable
+### 🔐 Multi-User Permissions
+- Admin, Recruiter, Viewer roles
+- Module-level access controls
 
-### 📄 Document Generation
-- Generate offer letters and onboarding forms
-- Templates with placeholders (e.g. `{candidate_name}`)
-- Export to DOCX or PDF using PhpWord or TCPDF
+### 📬 Email Logging (Future Phase)
+- Outbound SMTP
+- Inbound IMAP (log to candidate/client)
+- Optional Gmail/Outlook integration if license-safe
 
-### 🗓️ Calendar Scheduling (EasyAppointments)
-- Schedule interviews without Calendly
-- Self-hosted integration with EasyAppointments
-- Store and view booking history per candidate
-
-### 💾 Backup & Restore
-- Manual export/import of database and uploads
-- Scheduled backups (optional CRON integration)
+### 📅 Scheduling Integration
+- Optional integration with EasyAppointments (LAMP-based)
+- Schedule interviews from job or candidate view
 
 ---
 
-## 💡 Under Consideration
+## 🧼 Future Polishing & Utilities
 
-- User roles and permissions (multi-user support)
-- Email templates with tags
-- REST API access for integrations
-- Simple mobile-friendly skin/theme
-- Desktop installer (Windows + Linux) with local XAMPP bundle
+- Backup/Restore (system snapshot)
+- Field-level deletion/editing (non-core fields)
+- Assign flow redesign
+- Responsive layout improvements
+- Advanced sidebar filtering UI (multi-field)
 
 ---
 
-## ❤️ Open Source Values
+## 📌 Release Tags
 
-All features will:
-- Be self-hosted
-- Use open-source components only
-- Avoid 3rd-party API lock-in
-- Remain free and MIT licensed
-
-Want to suggest a feature later? We’ll open up GitHub once v1 proves stable.
+- `v0.6` — Core modules locked and UI overhaul complete
+- `v0.7` — Search, Dashboard, Resume Parsing, and DOCX Generation (planned)
