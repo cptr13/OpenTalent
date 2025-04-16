@@ -1,0 +1,21 @@
+Jason Cooper 
+jason.cooper@gmail.com 
+(312) 555-8701 
+Chicago, IL 
+https://linkedin.com/in/jason-cooper
+
+Senior Software Engineer with 8+ years of experience in backend systems, APIs, and DevOps tooling.
+
+Skills: Python, Django, REST APIs, PostgreSQL, Docker, Kubernetes, AWS
+
+Work Experience:
+Senior Software Engineer - ScaleFlow (2020-Present)
+- Built scalable backend microservices serving 2M+ users
+- Migrated legacy monolith to Kubernetes
+
+Software Engineer - CodeSprout (2016-2020)
+- Led payment gateway integrations (Stripe, Square)
+- Wrote RESTful APIs and CI/CD pipelines
+
+Education:
+B.S. in Computer Science, University of Illinois

@@ -1,0 +1,20 @@
+Marcus Lee 
+marcuslee.tech@gmail.com 
+(415) 555-2998 
+San Francisco, CA 
+https://github.com/marcuslee
+
+Full Stack Developer with expertise in scalable SaaS applications and cross-platform tools.
+
+Skills: JavaScript, React, Node.js, PostgreSQL, AWS, CI/CD
+
+Work Experience:
+Full Stack Developer - HorizonTech Solutions (2020-Present)
+- Developed new billing engine that reduced customer churn by 18%
+- Built internal dashboard for real-time metrics and analytics
+
+Software Engineer - CloudOrbit (2017-2020)
+- Contributed to open source projects and led code review efforts
+
+Education:
+B.S. in Computer Engineering, UC Berkeley

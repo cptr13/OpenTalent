@@ -1,0 +1,21 @@
+Benjamin Carter 
+ben.carter@velocityhealth.com 
+(617) 555-6621 
+Boston, MA 
+https://linkedin.com/in/ben-carter-ops
+
+IT Systems Administrator with 7+ years of experience in healthcare tech environments.
+
+Skills: Linux, Windows Server, Active Directory, EHR Integrations, Network Security, HIPAA Compliance
+
+Work Experience:
+Systems Administrator - Velocity Health Systems (2020-Present)
+- Managed hybrid infrastructure supporting 300+ employees
+- Migrated core systems to cloud with zero downtime
+
+IT Support Specialist - MedTech Group (2015-2020)
+- Provided L2/L3 support across multiple departments
+
+Education:
+B.S. in Information Systems, Boston University
+Certifications: CompTIA Network+, Microsoft Azure Admin
