@@ -1,9 +1,0 @@
-Array
-(
-    [zipFile] => /tmp/php2AePfj
-    [exists] => 1
-    [size] => 33558092
-    [mime] => application/zip
-    [is_uploaded] => 1
-    [header] => 504b0304
-)
