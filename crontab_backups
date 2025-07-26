@@ -1,2 +1,0 @@
-0 * * * * /var/www/html/OT2/backup.sh
-0 3 * * * /var/www/html/OT2/daily_backup.sh
