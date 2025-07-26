@@ -1,1 +1,0 @@
-<?php /* Candidate management logic */ ?>

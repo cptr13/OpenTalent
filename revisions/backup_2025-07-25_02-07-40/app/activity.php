@@ -1,1 +1,0 @@
-<?php /* Activity log logic */ ?>

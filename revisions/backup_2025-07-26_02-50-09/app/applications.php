@@ -1,1 +1,0 @@
-<?php /* Application logic */ ?>
