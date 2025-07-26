@@ -1,0 +1,1 @@
+mysql -h 'localhost' -u 'opentalent_dev' -p'8ther4you' 'opentalent_dev'

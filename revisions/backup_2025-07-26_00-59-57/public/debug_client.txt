@@ -1,0 +1,4 @@
+Update failed: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'phone' in 'field list'
+Update failed: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'address' in 'field list'
+Update failed: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'notes' in 'field list'
+Update failed: SQLSTATE[42S22]: Column not found: 1054 Unknown column 'notes' in 'field list'
