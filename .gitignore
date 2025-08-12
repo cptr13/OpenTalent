@@ -1,0 +1,81 @@
+# --- OpenTalent essentials ---
+# Secrets
+config/database.php
+.env
+.env.*
+
+# Uploads: ignore all files but keep folders via .gitkeep
+!public/uploads/contracts/.gitkeep
+!public/uploads/cover_letters/.gitkeep
+!public/uploads/formatted_resumes/.gitkeep
+!public/uploads/other_attachments/.gitkeep
+
+# Optional: ignore vendor if you install it on deploy
+vendor/
+
+# Common noise
+*.log
+*.sql
+*.sqlite
+*.bak
+*.tmp
+*.swp
+.DS_Store
+.idea/
+.vscode/
+# --- Runtime & uploads (root) ---
+uploads/**
+!uploads/.gitkeep
+
+# Keep tmp/restore dir but not contents
+tmp_restore/**
+!tmp_restore/.gitkeep
+
+# Secrets
+config/database.php
+.env
+.env.*
+
+# Debug/runtime artifacts
+INSTALL_LOCKED
+debug_reset_*.txt
+public/debug*.txt
+
+# Common noise
+*.log
+*.bak
+*.tmp
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
+# Dependencies (optional; keep if you install on deploy)
+vendor/
+node_modules/
+
+# If you keep a canonical schema file, allow it:
+!config/schema.sql
+# OT essentials
+config/database.php
+.env
+.env.*
+
+# Uploads: ignore contents, keep folders with .gitkeep
+uploads/**
+!uploads/.gitkeep
+
+# Debug/runtime
+INSTALL_LOCKED
+debug_reset_*.txt
+public/debug*.txt
+
+# Dependencies
+vendor/
+node_modules/
+
+# Logs
+*.log
+
+# Fully ignore public/uploads (folder should not exist in repo)
+public/uploads/
