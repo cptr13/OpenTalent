@@ -34,7 +34,7 @@ $status_options = [
     <a href="delete_client.php?id=<?= $client['id'] ?>" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this client?');">Delete</a>
 </div>
 
-<form method="POST" action="update_client.php">
+<form method="POST" action="update_client.php" enctype="multipart/form-data">
     <input type="hidden" name="id" value="<?= htmlspecialchars($client['id']) ?>">
 
     <div class="mb-3">
@@ -83,8 +83,38 @@ $status_options = [
         <textarea name="about" id="about" class="form-control" rows="4"><?= htmlspecialchars($client['about']) ?></textarea>
     </div>
 
-    <button type="submit" class="btn btn-success">Update Client</button>
-    <a href="delete_client.php?id=<?= $client['id'] ?>" class="btn btn-danger float-end" onclick="return confirm('Are you sure you want to delete this client?');">Delete</a>
+    <!-- Attachments (client-level) -->
+    <hr class="my-4">
+    <h5>Attachments</h5>
+    <p class="text-muted small mb-3">Optional: upload client documents (e.g., MSA, SOW, NDA). Max 5MB each.</p>
+
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label class="form-label">MSA</label>
+            <input type="file" name="msa_file" class="form-control">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">SOW</label>
+            <input type="file" name="sow_file" class="form-control">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">NDA</label>
+            <input type="file" name="nda_file" class="form-control">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Other Attachment 1</label>
+            <input type="file" name="other_attachment_1" class="form-control">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">Other Attachment 2</label>
+            <input type="file" name="other_attachment_2" class="form-control">
+        </div>
+    </div>
+
+    <div class="d-flex align-items-center mt-4">
+        <button type="submit" class="btn btn-success">Update Client</button>
+        <a href="delete_client.php?id=<?= $client['id'] ?>" class="btn btn-danger ms-auto" onclick="return confirm('Are you sure you want to delete this client?');">Delete</a>
+    </div>
 </form>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>

@@ -16,6 +16,61 @@ if (!$candidate_id) {
     exit;
 }
 
+// ---- Helpers ----
+function h($v) { return htmlspecialchars((string)($v ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
+function is_viewable_inline(string $ext): bool {
+    return in_array(strtolower($ext), ['pdf','png','jpg','jpeg','gif','webp'], true);
+}
+function file_icon(string $ext): string {
+    $ext = strtolower($ext);
+    if (in_array($ext, ['png','jpg','jpeg','gif','webp'])) return '🖼️';
+    if ($ext === 'pdf') return '📕';
+    if (in_array($ext, ['doc','docx'])) return '📝';
+    if (in_array($ext, ['xls','xlsx','csv'])) return '📊';
+    if (in_array($ext, ['ppt','pptx'])) return '📽️';
+    if (in_array($ext, ['txt','rtf'])) return '📄';
+    return '📎';
+}
+function format_bytes(int $bytes): string {
+    $units = ['B','KB','MB','GB','TB'];
+    $i = 0;
+    while ($bytes >= 1024 && $i < count($units)-1) { $bytes /= 1024; $i++; }
+    return sprintf('%.1f %s', $bytes, $units[$i]);
+}
+function build_file_view_url(string $relativePath): string {
+    return 'file_view.php?path=' . urlencode($relativePath);
+}
+function build_file_download_url(string $relativePath): string {
+    return 'file_download.php?path=' . urlencode($relativePath);
+}
+// Unified delete URLs (file_delete.php)
+function build_delete_only_url(string $relativePath, string $returnUrl): string {
+    return 'file_delete.php?mode=delete&path=' . urlencode($relativePath) . '&return=' . urlencode($returnUrl);
+}
+function build_delete_both_url(string $relativePath, int $candidateId, string $field, string $returnUrl): string {
+    // Deletes file AND clears DB field
+    return 'file_delete.php?mode=both&path=' . urlencode($relativePath)
+        . '&candidate_id=' . $candidateId
+        . '&field=' . urlencode($field)
+        . '&return=' . urlencode($returnUrl);
+}
+function build_clear_only_url(int $candidateId, string $field, string $returnUrl): string {
+    // Clears DB field only
+    return 'file_delete.php?mode=clear&candidate_id=' . $candidateId
+        . '&field=' . urlencode($field)
+        . '&return=' . urlencode($returnUrl);
+}
+function render_file_actions_strict(string $relativePath, string $deleteUrl): string {
+    $ext = strtolower(pathinfo($relativePath, PATHINFO_EXTENSION));
+    $btns = '';
+    if (is_viewable_inline($ext)) {
+        $btns .= '<a class="btn btn-sm btn-outline-primary me-2" target="_blank" href="' . build_file_view_url($relativePath) . '">View</a>';
+    }
+    $btns .= '<a class="btn btn-sm btn-outline-secondary me-2" href="' . build_file_download_url($relativePath) . '">Download</a>';
+    $btns .= '<a class="btn btn-sm btn-outline-danger" onclick="return confirm(\'Delete file from disk and clear DB?\')" href="' . $deleteUrl . '">Delete</a>';
+    return $btns;
+}
+
 $stmt = $pdo->prepare("SELECT * FROM candidates WHERE id = ?");
 $stmt->execute([$candidate_id]);
 $candidate = $stmt->fetch();
@@ -39,7 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['content'])) {
             header("Location: view_candidate.php?id=$candidate_id&msg=Note+added+successfully");
             exit;
         } catch (PDOException $e) {
-            $error = "Error saving note: " . htmlspecialchars($e->getMessage());
+            $error = "Error saving note: " . h($e->getMessage());
         }
     } else {
         $error = "Note cannot be empty.";
@@ -70,23 +125,54 @@ foreach ($all_notes as $note) {
     }
 }
 
-// Load job associations
-$stmt = $pdo->prepare("SELECT j.title, j.id as job_id, a.status, a.id as association_id FROM associations a JOIN jobs j ON a.job_id = j.id WHERE a.candidate_id = ?");
+// Load job associations WITH contacts + client
+$stmt = $pdo->prepare("
+    SELECT 
+        a.id AS association_id,
+        a.status,
+        j.id AS job_id,
+        j.title,
+        cl.id AS client_id,
+        cl.name AS client_name,
+        GROUP_CONCAT(
+            CONCAT(
+                c.id, ':',
+                COALESCE(c.full_name, CONCAT(TRIM(c.first_name), ' ', TRIM(c.last_name)))
+            )
+            ORDER BY c.last_name, c.first_name
+            SEPARATOR ','
+        ) AS contact_pairs
+    FROM associations a
+    JOIN jobs j           ON a.job_id = j.id
+    LEFT JOIN clients cl  ON j.client_id = cl.id
+    LEFT JOIN job_contacts jc ON jc.job_id = j.id
+    LEFT JOIN contacts c  ON c.id = jc.contact_id
+    WHERE a.candidate_id = ?
+    GROUP BY a.id, a.status, j.id, j.title, cl.id, cl.name
+    ORDER BY a.created_at DESC, j.title ASC
+");
 $stmt->execute([$candidate_id]);
 $associations = $stmt->fetchAll();
 ?>
 
+<!-- Local tweaks -->
+<style>
+  .assoc-row { line-height: 1; gap: .5rem; }
+  .assoc-sep { color: #6c757d; }
+  .assoc-link { white-space: nowrap; }
+</style>
+
 <div class="container my-4">
     <?php if ($flash_message): ?>
-        <div class="alert alert-success"><?= htmlspecialchars($flash_message) ?></div>
+        <div class="alert alert-success"><?= h($flash_message) ?></div>
     <?php endif; ?>
     <?php if ($error): ?>
-        <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
+        <div class="alert alert-danger"><?= h($error) ?></div>
     <?php endif; ?>
 
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2><?= htmlspecialchars($candidate['first_name'] . ' ' . $candidate['last_name']) ?></h2>
-        <a href="edit_candidate.php?id=<?= $candidate['id'] ?>" class="btn btn-sm btn-primary">Edit</a>
+        <h2><?= h(($candidate['first_name'] ?? '') . ' ' . ($candidate['last_name'] ?? '')) ?></h2>
+        <a href="edit_candidate.php?id=<?= (int)$candidate['id'] ?>" class="btn btn-sm btn-primary">Edit</a>
     </div>
 
     <div class="row g-4">
@@ -94,14 +180,14 @@ $associations = $stmt->fetchAll();
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>Information</span>
-                    <a href="edit_candidate.php?id=<?= $candidate['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
+                    <a href="edit_candidate.php?id=<?= (int)$candidate['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
                 </div>
                 <div class="card-body">
-                    <p><strong>Phone:</strong> <?= htmlspecialchars($candidate['phone'] ?? '') ?></p>
-                    <p><strong>Email:</strong> <?= htmlspecialchars($candidate['email'] ?? '') ?></p>
-                    <p><strong>Secondary Email:</strong> <?= htmlspecialchars($candidate['secondary_email'] ?? '') ?></p>
-                    <p><strong>LinkedIn:</strong> <?= htmlspecialchars($candidate['linkedin'] ?? '') ?></p>
-                    <p><strong>Owner:</strong> <?= htmlspecialchars($candidate['owner'] ?? '—') ?></p>
+                    <p><strong>Phone:</strong> <?= h($candidate['phone'] ?? '') ?></p>
+                    <p><strong>Email:</strong> <?= h($candidate['email'] ?? '') ?></p>
+                    <p><strong>Secondary Email:</strong> <?= h($candidate['secondary_email'] ?? '') ?></p>
+                    <p><strong>LinkedIn:</strong> <?= h($candidate['linkedin'] ?? '') ?></p>
+                    <p><strong>Owner:</strong> <?= h($candidate['owner'] ?? '—') ?></p>
                 </div>
             </div>
         </div>
@@ -110,14 +196,14 @@ $associations = $stmt->fetchAll();
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>Address</span>
-                    <a href="edit_candidate.php?id=<?= $candidate['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
+                    <a href="edit_candidate.php?id=<?= (int)$candidate['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
                 </div>
                 <div class="card-body">
-                    <p><strong>Street:</strong> <?= htmlspecialchars($candidate['street'] ?? '') ?></p>
-                    <p><strong>City:</strong> <?= htmlspecialchars($candidate['city'] ?? '') ?></p>
-                    <p><strong>State:</strong> <?= htmlspecialchars($candidate['state'] ?? '') ?></p>
-                    <p><strong>Zip:</strong> <?= htmlspecialchars($candidate['zip'] ?? '') ?></p>
-                    <p><strong>Country:</strong> <?= htmlspecialchars($candidate['country'] ?? '') ?></p>
+                    <p><strong>Street:</strong> <?= h($candidate['street'] ?? '') ?></p>
+                    <p><strong>City:</strong> <?= h($candidate['city'] ?? '') ?></p>
+                    <p><strong>State:</strong> <?= h($candidate['state'] ?? '') ?></p>
+                    <p><strong>Zip:</strong> <?= h($candidate['zip'] ?? '') ?></p>
+                    <p><strong>Country:</strong> <?= h($candidate['country'] ?? '') ?></p>
                 </div>
             </div>
         </div>
@@ -126,43 +212,42 @@ $associations = $stmt->fetchAll();
     <div class="row g-4 mt-3">
         <div class="col-md-6">
             <div class="card h-100">
-                <div class="card-header">Professional</div>
-                <div class="card-body">
-                    <p><strong>Current Job:</strong> <?= htmlspecialchars($candidate['current_job'] ?? '') ?></p>
-                    <p><strong>Current Employer:</strong> <?= htmlspecialchars($candidate['current_employer'] ?? '') ?></p>
-                    <p><strong>Current Pay:</strong> <?= htmlspecialchars($candidate['current_pay'] ?? '') ?></p>
-                    <p><strong>Pay Type:</strong> <?= htmlspecialchars($candidate['current_pay_type'] ?? '') ?></p>
-                    <p><strong>Expected Pay:</strong> <?= htmlspecialchars($candidate['expected_pay'] ?? '') ?></p>
-                    <p><strong>Expected Pay Type:</strong> <?= htmlspecialchars($candidate['expected_pay_type'] ?? '') ?></p>
-                    <p><strong>Experience (Years):</strong> <?= htmlspecialchars($candidate['experience_years'] ?? '') ?></p>
-                    <p><strong>Source:</strong> <?= htmlspecialchars($candidate['source'] ?? '') ?></p>
-                    <p><strong>Additional Info:</strong><br><?= nl2br(htmlspecialchars($candidate['additional_info'] ?? '')) ?></p>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-6">
-            <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
-    <span>Resume Text</span>
-    <a href="view_resume_text.php?id=<?= $candidate_id ?>" target="_blank" class="btn btn-sm btn-outline-secondary">Fullscreen</a>
-</div>
+                    <span>Resume Text</span>
+                    <a href="view_resume_text.php?id=<?= urlencode($candidate_id) ?>" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">Fullscreen</a>
+                </div>
                 <div class="card-body" style="max-height: 300px; overflow-y: auto;">
                     <?php if (!empty($candidate['resume_filename'])): ?>
-                        <p><strong>Resume File:</strong>
-                            <a href="/uploads/resumes/<?= urlencode($candidate['resume_filename']) ?>" target="_blank">
-                                <?= htmlspecialchars($candidate['resume_filename']) ?>
-                            </a>
-                        </p>
+                        <?php
+                            $projectRoot = realpath(__DIR__ . '/..');
+                            $uploadsRoot = $projectRoot . '/uploads';
+                            $rel = 'resumes/' . $candidate['resume_filename'];
+                            $abs = $uploadsRoot . '/' . $rel;
+                            if (is_file($abs)) {
+                                $size = format_bytes((int)filesize($abs));
+                                $ext  = strtolower(pathinfo($rel, PATHINFO_EXTENSION));
+                                $icon = file_icon($ext);
+                                $deleteUrl = build_delete_both_url($rel, (int)$candidate_id, 'resume_filename', $_SERVER['REQUEST_URI']);
+                            ?>
+                                <div class="mb-2 d-flex justify-content-between align-items-center">
+                                    <span><strong>Resume File:</strong> <?= $icon ?> <?= h($candidate['resume_filename']) ?> <span class="text-muted small ms-2">(<?= h($size) ?>)</span></span>
+                                    <span class="d-flex gap-2">
+                                        <?= render_file_actions_strict($rel, $deleteUrl) ?>
+                                    </span>
+                                </div>
+                            <?php } else { ?>
+                                <div class="mb-2 d-flex justify-content-between align-items-center">
+                                    <span><strong>Resume File:</strong> <em class="text-muted">missing on disk</em> (<?= h($candidate['resume_filename']) ?>)</span>
+                                    <a class="btn btn-sm btn-outline-dark" onclick="return confirm('Clear database reference?')"
+                                       href="<?= h(build_clear_only_url((int)$candidate_id, 'resume_filename', $_SERVER['REQUEST_URI'])) ?>">Clear</a>
+                                </div>
+                            <?php } ?>
                     <?php endif; ?>
-                    <pre style="white-space: pre-wrap;"><?= htmlspecialchars($candidate['resume_text'] ?? '') ?></pre>
+                    <pre style="white-space: pre-wrap;"><?= h($candidate['resume_text'] ?? '') ?></pre>
                 </div>
             </div>
         </div>
     </div>
-
-<!-- Remaining content (Attachments, Status & Roles, Notes) stays unchanged -->
-<!-- You confirmed not to touch anything else -->
 
 <!-- Attachments -->
 <div class="row g-4 mt-3">
@@ -172,45 +257,93 @@ $associations = $stmt->fetchAll();
             <div class="card-body">
                 <ul class="list-group">
                     <?php
+                    // Map: label => [field, folder]
                     $attachments = [
-                        'Resume' => $candidate['resume_filename'] ?? null,
-                        'Formatted Resume' => $candidate['formatted_resume_filename'] ?? null,
-                        'Cover Letter' => $candidate['cover_letter_filename'] ?? null,
-                        'Other Attachment 1' => $candidate['other_attachment_1'] ?? null,
-                        'Other Attachment 2' => $candidate['other_attachment_2'] ?? null,
-                        'Contract' => $candidate['contract_filename'] ?? null
+                        'Resume'             => ['resume_filename',            'resumes/'],
+                        'Formatted Resume'   => ['formatted_resume_filename', 'resumes/'],
+                        'Cover Letter'       => ['cover_letter_filename',     'resumes/'],
+                        'Other Attachment 1' => ['other_attachment_1',        'resumes/'],
+                        'Other Attachment 2' => ['other_attachment_2',        'resumes/'],
+                        'Contract'           => ['contract_filename',         'resumes/'],
                     ];
+                    $projectRoot = realpath(__DIR__ . '/..');
+                    $uploadsRoot = $projectRoot . '/uploads';
 
-                    foreach ($attachments as $label => $filename):
-                        if (!empty($filename)):
-                            $safeFile = htmlspecialchars($filename);
-                            $url = "/uploads/resumes/" . urlencode($filename);
+                    foreach ($attachments as $label => [$field, $folder]):
+                        $filename = $candidate[$field] ?? null;
+                        if (empty($filename)) continue;
+
+                        $rel = $folder . $filename;
+                        $abs = $uploadsRoot . '/' . $rel;
+
+                        if (!is_file($abs)) {
+                            // Ghost reference: show clear action
+                            ?>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span><strong><?= h($label) ?>:</strong> <em class="text-muted">missing on disk</em> (<?= h($filename) ?>)</span>
+                                <a class="btn btn-sm btn-outline-dark" onclick="return confirm('Clear database reference?')"
+                                   href="<?= h(build_clear_only_url((int)$candidate_id, $field, $_SERVER['REQUEST_URI'])) ?>">Clear</a>
+                            </li>
+                            <?php
+                            continue;
+                        }
+
+                        $size = format_bytes((int)filesize($abs));
+                        $ext  = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+                        $icon = file_icon($ext);
+                        $deleteUrl = build_delete_both_url($rel, (int)$candidate_id, $field, $_SERVER['REQUEST_URI']);
                     ?>
                         <li class="list-group-item d-flex justify-content-between align-items-center">
-                            <span><strong><?= $label ?>:</strong> <?= $safeFile ?></span>
-                            <span>
-                                <a href="<?= $url ?>" target="_blank" class="btn btn-sm btn-outline-primary me-2">View</a>
-                                <a href="<?= $url ?>" download class="btn btn-sm btn-outline-secondary">Download</a>
+                            <span><strong><?= h($label) ?>:</strong> <?= $icon ?> <?= h($filename) ?> <span class="text-muted small ms-2">(<?= h($size) ?>)</span></span>
+                            <span class="d-flex gap-2">
+                                <?= render_file_actions_strict($rel, $deleteUrl) ?>
                             </span>
                         </li>
-                    <?php
-                        endif;
-                    endforeach;
-                    ?>
+                    <?php endforeach; ?>
                 </ul>
             </div>
         </div>
     </div>
 </div>
 
-
     <!-- Status & Roles -->
+    <?php
+    // Load associations (same as before)
+    $stmt = $pdo->prepare("
+        SELECT 
+            a.id AS association_id,
+            a.status,
+            j.id AS job_id,
+            j.title,
+            cl.id AS client_id,
+            cl.name AS client_name,
+            GROUP_CONCAT(
+                CONCAT(
+                    c.id, ':',
+                    COALESCE(c.full_name, CONCAT(TRIM(c.first_name), ' ', TRIM(c.last_name)))
+                )
+                ORDER BY c.last_name, c.first_name
+                SEPARATOR ','
+            ) AS contact_pairs
+        FROM associations a
+        JOIN jobs j           ON a.job_id = j.id
+        LEFT JOIN clients cl  ON j.client_id = cl.id
+        LEFT JOIN job_contacts jc ON jc.job_id = j.id
+        LEFT JOIN contacts c  ON c.id = jc.contact_id
+        WHERE a.candidate_id = ?
+        GROUP BY a.id, a.status, j.id, j.title, cl.id, cl.name
+        ORDER BY a.created_at DESC, j.title ASC
+    ");
+    $stmt->execute([$candidate_id]);
+    $associations = $stmt->fetchAll();
+    ?>
+
     <div class="row g-4 mt-3">
         <div class="col-12">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>Status & Roles</span>
-                    <a href="associate.php?candidate_id=<?= $candidate_id ?>" class="btn btn-sm btn-success">+ Associate Job</a>
+                    <a href="associate.php?candidate_id=<?= urlencode($candidate_id) ?>" class="btn btn-sm btn-success">+ Associate Job</a>
                 </div>
                 <div class="card-body">
                     <?php if (empty($associations)): ?>
@@ -218,20 +351,39 @@ $associations = $stmt->fetchAll();
                     <?php else: ?>
                         <ul class="list-group">
                             <?php foreach ($associations as $a): ?>
+                                <?php
+                                $contactLinks = [];
+                                if (!empty($a['contact_pairs'])) {
+                                    $pairs = explode(',', $a['contact_pairs']);
+                                    foreach ($pairs as $pair) {
+                                        $parts = explode(':', $pair, 2);
+                                        if (count($parts) === 2) {
+                                            $cid = (int)$parts[0];
+                                            $cname = trim($parts[1]);
+                                            if ($cid && $cname !== '') {
+                                                $contactLinks[] = '<a href="view_contact.php?id=' . $cid . '" class="assoc-link">' . h($cname) . '</a>';
+                                            }
+                                        }
+                                    }
+                                }
+                                ?>
                                 <li class="list-group-item">
                                     <div class="d-flex justify-content-between align-items-center">
-                                        <div>
-                                            <a href="view_job.php?id=<?= $a['job_id'] ?>">
-                                                <?= htmlspecialchars($a['title']) ?>
-                                            </a>
-                                            <span class="badge bg-secondary ms-2"><?= htmlspecialchars($a['status']) ?></span>
+                                        <div class="assoc-row d-flex flex-wrap align-items-center">
+                                            <a href="view_job.php?id=<?= (int)$a['job_id'] ?>" class="assoc-link"><?= h($a['title']) ?></a>
+                                            <span class="assoc-sep">•</span>
+                                            <?= !empty($contactLinks) ? implode(', ', $contactLinks) : '<span class="text-muted">No contact</span>' ?>
+                                            <span class="assoc-sep">•</span>
+                                            <?= !empty($a['client_id']) ? '<a href="view_client.php?id='.(int)$a['client_id'].'" class="assoc-link">'.h($a['client_name'] ?? 'Company').'</a>' : '<span class="text-muted">No company</span>' ?>
+                                            <span class="assoc-sep">•</span>
+                                            <span class="badge rounded-pill bg-secondary text-white"><?= h($a['status']) ?></span>
                                         </div>
-                                        <a href="edit_association.php?id=<?= $a['association_id'] ?>" class="btn btn-sm btn-outline-primary">Edit Status</a>
+                                        <a href="edit_association.php?id=<?= (int)$a['association_id'] ?>" class="btn btn-sm btn-outline-primary">Edit Status</a>
                                     </div>
                                     <?php if (!empty($association_notes[$a['association_id']])): ?>
                                         <ul class="list-group list-group-flush mt-2 ms-3">
                                             <?php foreach ($association_notes[$a['association_id']] as $n): ?>
-                                                <li class="list-group-item small text-muted"><?= nl2br(htmlspecialchars($n['content'])) ?></li>
+                                                <li class="list-group-item small text-muted"><?= nl2br(h($n['content'])) ?></li>
                                             <?php endforeach; ?>
                                         </ul>
                                     <?php endif; ?>
@@ -262,7 +414,7 @@ $associations = $stmt->fetchAll();
                     <?php else: ?>
                         <ul class="list-group">
                             <?php foreach ($candidate_notes as $note): ?>
-                                <li class="list-group-item"><?= nl2br(htmlspecialchars($note['content'])) ?></li>
+                                <li class="list-group-item"><?= nl2br(h($note['content'])) ?></li>
                             <?php endforeach; ?>
                         </ul>
                     <?php endif; ?>

@@ -6,19 +6,33 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-function handle_file_upload($field, $upload_dir = '../uploads/') {
+function handle_file_upload($field, $upload_dir = null) {
     if (!isset($_FILES[$field]) || $_FILES[$field]['error'] !== UPLOAD_ERR_OK) {
         return null;
     }
 
-    $filename = basename($_FILES[$field]['name']);
-    $target_path = $upload_dir . $filename;
+    // Default upload dir: /uploads/resumes/ (absolute path from this file)
+    if ($upload_dir === null) {
+        $upload_dir = __DIR__ . '/../uploads/resumes/';
+    } else {
+        // If a relative path was passed, make it absolute from this file
+        if (strpos($upload_dir, __DIR__) !== 0) {
+            $upload_dir = rtrim(__DIR__ . '/' . ltrim($upload_dir, '/'), '/') . '/';
+        }
+    }
 
     if (!is_dir($upload_dir)) {
         mkdir($upload_dir, 0755, true);
     }
 
-    if (move_uploaded_file($_FILES[$field]['tmp_name'], $target_path)) {
+    // Sanitize and de-dupe filename
+    $original   = basename($_FILES[$field]['name']);
+    $safe       = preg_replace('/[^a-zA-Z0-9_.-]/', '_', $original);
+    $filename   = time() . '_' . $safe;
+    $targetPath = rtrim($upload_dir, '/') . '/' . $filename;
+
+    if (move_uploaded_file($_FILES[$field]['tmp_name'], $targetPath)) {
+        // We store just the filename in DB; serving is handled elsewhere
         return $filename;
     }
 
@@ -36,12 +50,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Convert empty dropdowns to NULL to avoid ENUM truncation
     $current_pay_type  = $_POST['current_pay_type'] ?? null;
     $expected_pay_type = $_POST['expected_pay_type'] ?? null;
-    if ($current_pay_type === '') {
-        $current_pay_type = null;
-    }
-    if ($expected_pay_type === '') {
-        $expected_pay_type = null;
-    }
+    if ($current_pay_type === '')  $current_pay_type = null;
+    if ($expected_pay_type === '') $expected_pay_type = null;
 
     $data = [
         'first_name'        => trim($_POST['first_name'] ?? ''),
@@ -68,14 +78,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'id'                => $id
     ];
 
-    // Handle attachments
+    // Handle attachments (all into /uploads/resumes/)
+    $dir = __DIR__ . '/../uploads/resumes/';
     $uploads = [
-        'resume_filename'            => handle_file_upload('resume_file'),
-        'formatted_resume_filename'  => handle_file_upload('formatted_resume_file'),
-        'cover_letter_filename'      => handle_file_upload('cover_letter_file'),
-        'contract_filename'          => handle_file_upload('contract_file'),
-        'other_attachment_1'         => handle_file_upload('other_attachment_1'),
-        'other_attachment_2'         => handle_file_upload('other_attachment_2')
+        'resume_filename'            => handle_file_upload('resume_file', $dir),
+        'formatted_resume_filename'  => handle_file_upload('formatted_resume_file', $dir),
+        'cover_letter_filename'      => handle_file_upload('cover_letter_file', $dir),
+        'contract_filename'          => handle_file_upload('contract_file', $dir),
+        'other_attachment_1'         => handle_file_upload('other_attachment_1', $dir),
+        'other_attachment_2'         => handle_file_upload('other_attachment_2', $dir),
     ];
 
     foreach ($uploads as $column => $filename) {
@@ -84,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // Build SQL dynamically to include only uploaded files
+    // Build SQL dynamically to include only uploaded file columns
     $fields = "
         first_name = :first_name,
         last_name = :last_name,
@@ -119,8 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($data);
 
-    // 🔥 Association logic removed – now handled exclusively in associate.php
-
+    // Associations handled elsewhere (associate.php)
     header("Location: view_candidate.php?id=" . $id);
     exit;
 } else {

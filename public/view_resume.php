@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/require_login.php';
 
-$upload_dir = __DIR__ . '/../uploads/';
+$upload_dir = __DIR__ . '/../uploads/resumes/';
 $filename = basename($_GET['file'] ?? '');
 $file_path = realpath($upload_dir . $filename);
 
