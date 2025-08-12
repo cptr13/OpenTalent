@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.php eol=lf
+*.sql eol=lf
+*.sh  eol=lf
