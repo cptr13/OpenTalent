@@ -42,3 +42,7 @@ node_modules/
 # Logs
 # Fully ignore public/uploads (folder should not exist in repo)
 public/uploads/
+
+# Secrets
+/config/email.php
+/config/database.php
