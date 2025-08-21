@@ -4,3 +4,4 @@
 /backup/
 *.log
 /logs/
+/config/INSTALL_LOCKED
