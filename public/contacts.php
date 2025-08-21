@@ -4,30 +4,53 @@ require_once '../includes/header.php';
 require_once '../config/database.php';
 require_once __DIR__ . '/../includes/list_view.php';
 require_once __DIR__ . '/../includes/sortable.php';
+require_once __DIR__ . '/../config/status.php'; // <-- Needed for getStatusList('contact')
 
 // Default to empty list in case of errors
 $contacts = [];
 $clientNames = [];
 
+// Build contact status dropdown options from config/status.contact.php
+$contactStatusOptions = [];
+try {
+    $statusList = getStatusList('contact'); // returns ['Category' => ['Sub1','Sub2',...]]
+    foreach ($statusList as $cat => $subs) {
+        foreach ($subs as $s) {
+            $contactStatusOptions[] = $s;
+        }
+    }
+    // Deduplicate just in case
+    $contactStatusOptions = array_values(array_unique($contactStatusOptions));
+} catch (Throwable $e) {
+    // If loader fails for any reason, leave options empty so list_view falls back to DISTINCT query
+    $contactStatusOptions = [];
+}
+
 // Config for Contacts list/filters
 $config = [
     'table' => 'contacts',
-    'default_columns' => ['first_name', 'last_name', 'email', 'phone', 'created_at'], // displayed + sortable
+    // Include contact_status so rows have it available for display/sort
+    'default_columns' => ['first_name', 'last_name', 'email', 'phone', 'contact_status', 'created_at'],
     'column_labels' => [
-        'first_name' => 'First Name',
-        'last_name'  => 'Last Name',
-        'email'      => 'Email',
-        'phone'      => 'Phone',
-        'created_at' => 'Created',
-        // Company shows via lookup; making it sortable needs a JOIN-aware sort (happy to add next)
+        'first_name'      => 'First Name',
+        'last_name'       => 'Last Name',
+        'email'           => 'Email',
+        'phone'           => 'Phone',
+        'created_at'      => 'Created',
+        'company'         => 'Company',       // Virtual column via JOIN in list_view (sort-enabled)
+        'contact_status'  => 'Status',
     ],
     'filter_types' => [
-        'first_name' => 'text',
-        'last_name'  => 'text',
-        'email'      => 'text',
-        'phone'      => 'text',
-        'created_at' => 'date_range',
-        // You can add 'client_id' => 'dropdown' later if you want a company filter
+        'first_name'      => 'text',
+        'last_name'       => 'text',
+        'email'           => 'text',
+        'phone'           => 'text',
+        'created_at'      => 'date_range',
+        'contact_status'  => 'dropdown',      // <-- Renders as a select
+    ],
+    // Provide static dropdown choices so it’s a curated select (no typing)
+    'filter_options' => [
+        'contact_status' => $contactStatusOptions, // <-- Options for the dropdown
     ],
 ];
 
@@ -37,11 +60,12 @@ $config = [
  * We sort "Name" by last_name (then first_name handled by list_view's secondary tie-break, if any).
  */
 $ALLOWED_COLUMNS = [
-    'last_name'  => 'last_name',
-    'email'      => 'email',
-    'phone'      => 'phone',
-    'company'    => 'company',    // now enabled
-    'created_at' => 'created_at',
+    'last_name'       => 'last_name',
+    'email'           => 'email',
+    'phone'           => 'phone',
+    'company'         => 'company',        // now enabled (JOIN sort)
+    'contact_status'  => 'contact_status', // <-- enable sort on Status
+    'created_at'      => 'created_at',
 ];
 
 // Defaults: sort by last_name ASC
@@ -127,10 +151,15 @@ try {
                             </a>
                         </th>
                         <th>
-  <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('company')) ?>">
-    Company<?= htmlspecialchars(($S['arrow'])('company')) ?>
-  </a>
-</th>
+                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('company')) ?>">
+                                Company<?= htmlspecialchars(($S['arrow'])('company')) ?>
+                            </a>
+                        </th>
+                        <th>
+                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('contact_status')) ?>">
+                                Status<?= htmlspecialchars(($S['arrow'])('contact_status')) ?>
+                            </a>
+                        </th>
                         <th>
                             <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('created_at')) ?>">
                                 Created<?= htmlspecialchars(($S['arrow'])('created_at')) ?>
@@ -163,6 +192,17 @@ try {
                                         <span class="text-muted">—</span>
                                     <?php endif; ?>
                                 </td>
+                                <td>
+                                    <?php
+                                        $status = trim((string)($contact['contact_status'] ?? ''));
+                                        if ($status === '') {
+                                            echo '<span class="text-muted">—</span>';
+                                        } else {
+                                            // Neutral compact badge (no category color yet)
+                                            echo '<span class="badge bg-secondary">'.htmlspecialchars($status).'</span>';
+                                        }
+                                    ?>
+                                </td>
                                 <td><?= htmlspecialchars($contact['created_at'] ?? '') ?></td>
                                 <td>
                                     <a href="edit_contact.php?id=<?= (int)$contact['id'] ?>" class="btn btn-warning btn-sm">Edit</a>
@@ -176,12 +216,12 @@ try {
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="6" class="text-center">No contacts found.</td>
+                            <td colspan="7" class="text-center">No contacts found.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
             </table>
-            <?= $pager_html ?>
+            <?= $pager_html ?? '' ?>
         </div>
     </main>
 </div>

@@ -27,7 +27,7 @@ $config = [
         'last_name'  => 'text',
         'email'      => 'text',
         'phone'      => 'text',
-        'status'     => 'dropdown',
+        'status'     => 'dropdown',   // Filter still uses candidates.status; fine for now.
         'owner'      => 'text',
         'created_at' => 'date_range',
     ],
@@ -36,7 +36,6 @@ $config = [
 /**
  * Sort controls for header links
  * Keys must match what list_view.php accepts via $_GET['sort'].
- * (list_view.php handles the actual ORDER BY; this mapping drives links/arrows safely)
  */
 $ALLOWED_COLUMNS = [
     'first_name' => 'first_name',
@@ -55,6 +54,72 @@ try {
 } catch (Throwable $e) {
     echo "<div class='alert alert-danger'>Error loading candidates: " . htmlspecialchars($e->getMessage()) . "</div>";
     $filter_html = '';
+}
+
+/**
+ * Override displayed status with the latest association status per candidate.
+ * - Primary attempt prefers associations.updated_at (most recently updated)
+ * - Fallback uses highest associations.id when updated_at isn't available
+ */
+if (!empty($candidates)) {
+    $ids = array_map(fn($r) => (int)($r['id'] ?? 0), $candidates);
+    $ids = array_values(array_filter($ids, fn($v) => $v > 0));
+
+    if ($ids) {
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $latestStatusByCandidate = [];
+
+        // Try using updated_at if present
+        try {
+            $sql = "
+                SELECT a.candidate_id, a.status
+                FROM associations a
+                JOIN (
+                    SELECT candidate_id, MAX(updated_at) AS max_updated
+                    FROM associations
+                    WHERE candidate_id IN ($placeholders)
+                    GROUP BY candidate_id
+                ) x ON x.candidate_id = a.candidate_id AND a.updated_at = x.max_updated
+            ";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($ids);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $latestStatusByCandidate[(int)$row['candidate_id']] = (string)$row['status'];
+            }
+        } catch (Throwable $e) {
+            // Fallback: use highest id per candidate
+            try {
+                $sql = "
+                    SELECT a.candidate_id, a.status
+                    FROM associations a
+                    JOIN (
+                        SELECT candidate_id, MAX(id) AS max_id
+                        FROM associations
+                        WHERE candidate_id IN ($placeholders)
+                        GROUP BY candidate_id
+                    ) x ON x.candidate_id = a.candidate_id AND a.id = x.max_id
+                ";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($ids);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $latestStatusByCandidate[(int)$row['candidate_id']] = (string)$row['status'];
+                }
+            } catch (Throwable $e2) {
+                // If associations table is missing/invalid, silently keep original candidate.status
+            }
+        }
+
+        // Apply overrides to the rows we render
+        if ($latestStatusByCandidate) {
+            foreach ($candidates as &$cand) {
+                $cid = (int)($cand['id'] ?? 0);
+                if ($cid > 0 && isset($latestStatusByCandidate[$cid]) && $latestStatusByCandidate[$cid] !== '') {
+                    $cand['status'] = $latestStatusByCandidate[$cid];
+                }
+            }
+            unset($cand);
+        }
+    }
 }
 
 ?>
@@ -149,7 +214,12 @@ try {
                                     <td><?= htmlspecialchars($candidate['last_name'] ?? '') ?></td>
                                     <td><?= htmlspecialchars($candidate['email'] ?? '') ?></td>
                                     <td><?= htmlspecialchars($candidate['phone'] ?? '') ?></td>
-                                    <td><span class="badge bg-secondary"><?= htmlspecialchars($candidate['status'] ?? 'N/A') ?></span></td>
+                                    <td>
+                                        <?php $st = trim((string)($candidate['status'] ?? '')); ?>
+                                        <span class="badge <?= $st === '' ? 'bg-secondary' : 'bg-secondary' ?>">
+                                            <?= htmlspecialchars($st !== '' ? $st : 'N/A') ?>
+                                        </span>
+                                    </td>
                                     <td><?= htmlspecialchars($candidate['owner'] ?? '—') ?></td>
                                     <td><?= htmlspecialchars(!empty($candidate['created_at']) ? date("Y-m-d", strtotime($candidate['created_at'])) : '') ?></td>
                                     <td>

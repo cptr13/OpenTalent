@@ -11,7 +11,9 @@ if (session_status() === PHP_SESSION_NONE) {
  *   'table' => 'clients',
  *   'default_columns' => [...],
  *   'column_labels' => ['db_col' => 'Label', ...],
- *   'filter_types' => ['db_col' => 'text|dropdown|equals|date_range', ...]
+ *   'filter_types' => ['db_col' => 'text|dropdown|equals|date_range', ...],
+ *   // Optional: provide fixed dropdown choices for specific filters
+ *   'filter_options' => ['db_col' => ['Option A','Option B', ...]]
  * ]
  * @return array [$rows, $filter_html, $sort_col, $sort_dir, $pager_html, $page_meta]
  */
@@ -19,39 +21,31 @@ function get_list_view_data(PDO $pdo, array $config)
 {
     // ---- Helpers ----
     $is_ident = function ($s) {
-        // allow letters, numbers, underscore; must start with letter or underscore
         return is_string($s) && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $s);
     };
     $bt = function ($ident) {
         return '`' . $ident . '`';
     };
     $build_query = function (array $params, array $overrides = []) {
-        // Preserve existing GET params except ones explicitly overridden/removed
         $base = $_GET;
-        // never carry reset forward
         unset($base['reset']);
-        // replace with overrides
         foreach ($overrides as $k => $v) {
-            if ($v === null) {
-                unset($base[$k]);
-            } else {
-                $base[$k] = $v;
-            }
+            if ($v === null) { unset($base[$k]); } else { $base[$k] = $v; }
         }
-        // Build encoded query
         $pairs = [];
         foreach ($base as $k => $v) {
-            if (is_array($v)) continue; // skip arrays for simplicity
+            if (is_array($v)) continue;
             $pairs[] = urlencode($k) . '=' . urlencode($v);
         }
         return $pairs ? ('?' . implode('&', $pairs)) : '';
     };
 
     // ---- Config ----
-    $table = $config['table'] ?? '';
+    $table           = $config['table'] ?? '';
     $default_columns = $config['default_columns'] ?? [];
-    $column_labels = $config['column_labels'] ?? [];
-    $filter_types = $config['filter_types'] ?? [];
+    $column_labels   = $config['column_labels'] ?? [];
+    $filter_types    = $config['filter_types'] ?? [];
+    $filter_options  = $config['filter_options'] ?? [];
 
     if (!$table) {
         throw new RuntimeException('list_view: table not specified');
@@ -60,10 +54,22 @@ function get_list_view_data(PDO $pdo, array $config)
         throw new RuntimeException('list_view: invalid table name');
     }
 
+    $isCandidatesTable = ($table === 'candidates');
+
+    // Detect whether associations.updated_at exists (used by candidates status filter)
+    $assocHasUpdatedAt = false;
+    if ($isCandidatesTable) {
+        try {
+            $colStmt = $pdo->query("SHOW COLUMNS FROM associations LIKE 'updated_at'");
+            $assocHasUpdatedAt = $colStmt && $colStmt->fetch(PDO::FETCH_ASSOC) ? true : false;
+        } catch (Throwable $e) {
+            $assocHasUpdatedAt = false;
+        }
+    }
+
     // Reset: clear filters and pagination state
     if (isset($_GET['reset'])) {
-        unset($_SESSION['filters'][$table]);
-        unset($_SESSION['pager'][$table]);
+        unset($_SESSION['filters'][$table], $_SESSION['pager'][$table]);
     }
 
     // If no default columns, try to use column_labels keys; fallback to ['id']
@@ -77,23 +83,20 @@ function get_list_view_data(PDO $pdo, array $config)
         array_keys($filter_types),
         array_keys($column_labels)
     ));
-    // Keep only valid identifiers
     $allowed_cols = array_values(array_filter($allowed_cols, $is_ident));
 
-    // Special: allow virtual "company" sort for contacts even if not in config arrays
+    // Allow virtual "company" sort for contacts
     if ($table === 'contacts' && !in_array('company', $allowed_cols, true)) {
         $allowed_cols[] = 'company';
     }
 
     // ---- Persist filters (GET -> session) ----
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        // basic filters
         foreach ($filter_types as $col => $type) {
             if (!$is_ident($col)) continue;
             if (isset($_GET[$col])) {
                 $_SESSION['filters'][$table][$col] = trim((string)$_GET[$col]);
             }
-            // date range extra fields
             if ($type === 'date_range') {
                 $sKey = $col . '_start';
                 $eKey = $col . '_end';
@@ -120,7 +123,6 @@ function get_list_view_data(PDO $pdo, array $config)
     $allowed_page_sizes = [20, 50, 100, 200];
     $default_per_page = 50;
 
-    // Read per_page
     if (isset($_GET['per_page'])) {
         $pp = (int)$_GET['per_page'];
         $_SESSION['pager'][$table]['per_page'] = in_array($pp, $allowed_page_sizes, true) ? $pp : $default_per_page;
@@ -131,11 +133,9 @@ function get_list_view_data(PDO $pdo, array $config)
     }
 
     // ----------------------------
-    // Branch by table where needed
+    // Contacts branch (JOIN + special sort map)
     // ----------------------------
-
     if ($table === 'contacts') {
-        // Aliases
         $ct = 'ct';
         $cl = 'cl';
         $qcol = function(string $col) use ($ct, $cl, $bt) {
@@ -143,12 +143,11 @@ function get_list_view_data(PDO $pdo, array $config)
             return "$ct." . $bt($col);
         };
 
-        // WHERE (qualified to contacts alias to avoid ambiguity)
+        // WHERE
         $where = [];
         $params = [];
         foreach ($filter_types as $col => $type) {
             if (!$is_ident($col)) continue;
-
             switch ($type) {
                 case 'text':
                 case 'equals':
@@ -158,13 +157,12 @@ function get_list_view_data(PDO $pdo, array $config)
                         if ($type === 'text') {
                             $where[] = $qcol($col) . " LIKE ?";
                             $params[] = '%' . $val . '%';
-                        } else { // equals|dropdown
+                        } else {
                             $where[] = $qcol($col) . " = ?";
                             $params[] = $val;
                         }
                     }
                     break;
-
                 case 'date_range':
                     $start = $filters[$col . '_start'] ?? '';
                     $end   = $filters[$col . '_end'] ?? '';
@@ -183,7 +181,7 @@ function get_list_view_data(PDO $pdo, array $config)
         }
         $where_sql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 
-        // Count with JOIN
+        // Count
         $count_sql = "
             SELECT COUNT(*) AS cnt
             FROM contacts $ct
@@ -194,14 +192,14 @@ function get_list_view_data(PDO $pdo, array $config)
         $count_stmt->execute($params);
         $total = (int)$count_stmt->fetchColumn();
 
-        // Read page
+        // Page
         if (isset($_GET['page'])) {
             $p = (int)$_GET['page'];
             $_SESSION['pager'][$table]['page'] = ($p >= 1) ? $p : 1;
         }
         $page = $_SESSION['pager'][$table]['page'] ?? 1;
 
-        // Compute pages
+        // Pages
         $total_pages = ($per_page > 0) ? (int)ceil($total / $per_page) : 1;
         if ($total_pages < 1) $total_pages = 1;
         if ($page > $total_pages) $page = $total_pages;
@@ -210,20 +208,21 @@ function get_list_view_data(PDO $pdo, array $config)
         $offset = ($page - 1) * $per_page;
         if ($offset < 0) $offset = 0;
 
-        // Map sort to qualified expressions (include virtual 'company')
+        // Sort map
         $sort_map = [
-            'first_name' => $qcol('first_name'),
-            'last_name'  => $qcol('last_name'),
-            'email'      => $qcol('email'),
-            'phone'      => $qcol('phone'),
-            'title'      => $qcol('title'),
-            'owner'      => $qcol('contact_owner'),
-            'created_at' => $qcol('created_at'),
-            'company'    => "$cl." . $bt('name'),
+            'first_name'     => $qcol('first_name'),
+            'last_name'      => $qcol('last_name'),
+            'email'          => $qcol('email'),
+            'phone'          => $qcol('phone'),
+            'title'          => $qcol('title'),
+            'owner'          => $qcol('contact_owner'),
+            'contact_status' => $qcol('contact_status'),
+            'created_at'     => $qcol('created_at'),
+            'company'        => "$cl." . $bt('name'),
         ];
         $order_expr = $sort_map[$sort_col] ?? $qcol('last_name');
 
-        // Main query with JOIN, qualified ORDER BY, and stable tie-break
+        // Main query — use positional placeholders for LIMIT/OFFSET
         $sql = "
             SELECT
                 $ct.*,
@@ -232,23 +231,24 @@ function get_list_view_data(PDO $pdo, array $config)
             LEFT JOIN clients $cl ON $cl.id = $ct.client_id
             $where_sql
             ORDER BY $order_expr $sort_dir, $ct.id ASC
-            LIMIT :limit OFFSET :offset
+            LIMIT ? OFFSET ?
         ";
 
         $stmt = $pdo->prepare($sql);
-        // Bind filter params
+        // Bind filter params (positional)
         $i = 1;
         foreach ($params as $pval) {
             $stmt->bindValue($i, $pval, is_int($pval) ? PDO::PARAM_INT : PDO::PARAM_STR);
             $i++;
         }
-        // Bind limit/offset
-        $stmt->bindValue(':limit', (int)$per_page, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', (int)$offset, PDO::PARAM_INT);
+        // Bind LIMIT/OFFSET (positional)
+        $stmt->bindValue($i++, (int)$per_page, PDO::PARAM_INT);
+        $stmt->bindValue($i++, (int)$offset, PDO::PARAM_INT);
+
         $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // ---- Filter panel HTML (unchanged, except it already uses $filter_types) ----
+        // ---- Filter panel HTML (supports static dropdown options) ----
         ob_start();
         echo "<form method='GET'>";
         foreach ($filter_types as $col => $type) {
@@ -266,13 +266,20 @@ function get_list_view_data(PDO $pdo, array $config)
             elseif ($type === 'dropdown') {
                 echo "<select class='form-control' name='" . htmlspecialchars($col, ENT_QUOTES) . "'>";
                 echo "<option value=''>-- Any --</option>";
-                // DISTINCT options from contacts table only (filters refer to contacts.*)
-                $optSql = "SELECT DISTINCT " . $bt($col) . " AS v FROM " . $bt($table) . " WHERE " . $bt($col) . " IS NOT NULL AND " . $bt($col) . " <> '' ORDER BY " . $bt($col) . " ASC";
-                $optStmt = $pdo->query($optSql);
-                $options = $optStmt ? $optStmt->fetchAll(PDO::FETCH_COLUMN) : [];
-                foreach ($options as $opt) {
-                    $selected = ($opt === $val) ? 'selected' : '';
-                    echo "<option value='" . htmlspecialchars($opt, ENT_QUOTES) . "' $selected>" . htmlspecialchars($opt) . "</option>";
+                if (!empty($filter_options[$col]) && is_array($filter_options[$col])) {
+                    foreach ($filter_options[$col] as $opt) {
+                        $optStr = (string)$opt;
+                        $selected = ($optStr === $val) ? 'selected' : '';
+                        echo "<option value='" . htmlspecialchars($optStr, ENT_QUOTES) . "' $selected>" . htmlspecialchars($optStr) . "</option>";
+                    }
+                } else {
+                    $optSql  = "SELECT DISTINCT " . $bt($col) . " AS v FROM " . $bt($table) . " WHERE " . $bt($col) . " IS NOT NULL AND " . $bt($col) . " <> '' ORDER BY " . $bt($col) . " ASC";
+                    $optStmt = $pdo->query($optSql);
+                    $options = $optStmt ? $optStmt->fetchAll(PDO::FETCH_COLUMN) : [];
+                    foreach ($options as $opt) {
+                        $selected = ($opt === $val) ? 'selected' : '';
+                        echo "<option value='" . htmlspecialchars($opt, ENT_QUOTES) . "' $selected>" . htmlspecialchars($opt) . "</option>";
+                    }
                 }
                 echo "</select>";
             }
@@ -289,7 +296,7 @@ function get_list_view_data(PDO $pdo, array $config)
         echo "</form>";
         $filter_html = ob_get_clean();
 
-        // ---- Pager HTML (same UI as before) ----
+        // ---- Pager HTML ----
         $from = $total ? ($offset + 1) : 0;
         $to   = $total ? min($offset + $per_page, $total) : 0;
 
@@ -351,12 +358,40 @@ function get_list_view_data(PDO $pdo, array $config)
     // Generic path (all other tables)
     // ----------------------------
 
-    // ---- WHERE clause ----
+    // WHERE
     $where = [];
     $params = [];
-
     foreach ($filter_types as $col => $type) {
         if (!$is_ident($col)) continue;
+
+        // SPECIAL: Candidates.status should filter by latest association.status
+        if ($isCandidatesTable && $col === 'status' && $type === 'dropdown') {
+            $val = $filters[$col] ?? '';
+            if ($val !== '' && $val !== null) {
+                $latestExpr = $assocHasUpdatedAt
+                    ? "SELECT a2.id
+                       FROM associations a2
+                       WHERE a2.candidate_id = candidates.id
+                       ORDER BY a2.updated_at DESC, a2.id DESC
+                       LIMIT 1"
+                    : "SELECT MAX(a2.id)
+                       FROM associations a2
+                       WHERE a2.candidate_id = candidates.id";
+
+                $where[] =
+                    "EXISTS (
+                        SELECT 1
+                        FROM associations a
+                        WHERE a.candidate_id = candidates.id
+                          AND a.status = ?
+                          AND a.id = (
+                              $latestExpr
+                          )
+                    )";
+                $params[] = $val;
+            }
+            continue; // handled; skip default
+        }
 
         switch ($type) {
             case 'text':
@@ -367,13 +402,12 @@ function get_list_view_data(PDO $pdo, array $config)
                     if ($type === 'text') {
                         $where[] = $bt($col) . " LIKE ?";
                         $params[] = '%' . $val . '%';
-                    } else { // equals|dropdown
+                    } else {
                         $where[] = $bt($col) . " = ?";
                         $params[] = $val;
                     }
                 }
                 break;
-
             case 'date_range':
                 $start = $filters[$col . '_start'] ?? '';
                 $end   = $filters[$col . '_end'] ?? '';
@@ -386,29 +420,26 @@ function get_list_view_data(PDO $pdo, array $config)
                     $params[] = $end;
                 }
                 break;
-
             default:
-                // unknown type -> skip
                 break;
         }
     }
-
     $where_sql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 
-    // ---- Counts (generic) ----
+    // Counts
     $count_sql = "SELECT COUNT(*) AS cnt FROM " . $bt($table) . " $where_sql";
     $count_stmt = $pdo->prepare($count_sql);
     $count_stmt->execute($params);
     $total = (int)$count_stmt->fetchColumn();
 
-    // Read page
+    // Page
     if (isset($_GET['page'])) {
         $p = (int)$_GET['page'];
         $_SESSION['pager'][$table]['page'] = ($p >= 1) ? $p : 1;
     }
     $page = $_SESSION['pager'][$table]['page'] ?? 1;
 
-    // Compute pages
+    // Pages
     $total_pages = ($per_page > 0) ? (int)ceil($total / $per_page) : 1;
     if ($total_pages < 1) $total_pages = 1;
     if ($page > $total_pages) $page = $total_pages;
@@ -417,22 +448,23 @@ function get_list_view_data(PDO $pdo, array $config)
     $offset = ($page - 1) * $per_page;
     if ($offset < 0) $offset = 0;
 
-    // ---- Query with LIMIT/OFFSET (generic) ----
-    $sql = "SELECT * FROM " . $bt($table) . " $where_sql ORDER BY " . $bt($sort_col) . " $sort_dir LIMIT :limit OFFSET :offset";
+    // Query — use positional placeholders for LIMIT/OFFSET
+    $sql = "SELECT * FROM " . $bt($table) . " $where_sql ORDER BY " . $bt($sort_col) . " $sort_dir LIMIT ? OFFSET ?";
     $stmt = $pdo->prepare($sql);
-    // Bind the same filter params
+    // Bind filter params (positional)
     $i = 1;
     foreach ($params as $pval) {
         $stmt->bindValue($i, $pval, is_int($pval) ? PDO::PARAM_INT : PDO::PARAM_STR);
         $i++;
     }
-    // Bind limit/offset as ints
-    $stmt->bindValue(':limit', (int)$per_page, PDO::PARAM_INT);
-    $stmt->bindValue(':offset', (int)$offset, PDO::PARAM_INT);
+    // Bind LIMIT/OFFSET (positional)
+    $stmt->bindValue($i++, (int)$per_page, PDO::PARAM_INT);
+    $stmt->bindValue($i++, (int)$offset, PDO::PARAM_INT);
+
     $stmt->execute();
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // ---- Filter panel HTML ----
+    // ---- Filter panel HTML (supports static dropdown options) ----
     ob_start();
     echo "<form method='GET'>";
     foreach ($filter_types as $col => $type) {
@@ -450,13 +482,35 @@ function get_list_view_data(PDO $pdo, array $config)
         elseif ($type === 'dropdown') {
             echo "<select class='form-control' name='" . htmlspecialchars($col, ENT_QUOTES) . "'>";
             echo "<option value=''>-- Any --</option>";
-            // DISTINCT options for this column
-            $optSql = "SELECT DISTINCT " . $bt($col) . " AS v FROM " . $bt($table) . " WHERE " . $bt($col) . " IS NOT NULL AND " . $bt($col) . " <> '' ORDER BY " . $bt($col) . " ASC";
-            $optStmt = $pdo->query($optSql);
-            $options = $optStmt ? $optStmt->fetchAll(PDO::FETCH_COLUMN) : [];
-            foreach ($options as $opt) {
-                $selected = ($opt === $val) ? 'selected' : '';
-                echo "<option value='" . htmlspecialchars($opt, ENT_QUOTES) . "' $selected>" . htmlspecialchars($opt) . "</option>";
+            if (!empty($filter_options[$col]) && is_array($filter_options[$col])) {
+                foreach ($filter_options[$col] as $opt) {
+                    $optStr = (string)$opt;
+                    $selected = ($optStr === $val) ? 'selected' : '';
+                    echo "<option value='" . htmlspecialchars($optStr, ENT_QUOTES) . "' $selected>" . htmlspecialchars($optStr) . "</option>";
+                }
+            } else {
+                // SPECIAL: candidates.status should come from canonical status list, not DISTINCT table values
+                if ($isCandidatesTable && $col === 'status') {
+                    require_once __DIR__ . '/../config/status.php';
+                    $statusList = [];
+                    try {
+                        $cfg = getStatusList('candidate'); // ['Category' => ['Sub1', ...], ...]
+                        foreach ($cfg as $group => $vals) {
+                            foreach ($vals as $v) $statusList[$v] = true;
+                        }
+                    } catch (Throwable $e) { /* fallback to none */ }
+                    $options = array_keys($statusList);
+                    sort($options, SORT_NATURAL | SORT_FLAG_CASE);
+                } else {
+                    $optSql = "SELECT DISTINCT " . $bt($col) . " AS v FROM " . $bt($table) . " WHERE " . $bt($col) . " IS NOT NULL AND " . $bt($col) . " <> '' ORDER BY " . $bt($col) . " ASC";
+                    $optStmt = $pdo->query($optSql);
+                    $options = $optStmt ? $optStmt->fetchAll(PDO::FETCH_COLUMN) : [];
+                }
+                foreach ($options as $opt) {
+                    $optStr = (string)$opt;
+                    $selected = ($optStr === $val) ? 'selected' : '';
+                    echo "<option value='" . htmlspecialchars($optStr, ENT_QUOTES) . "' $selected>" . htmlspecialchars($optStr) . "</option>";
+                }
             }
             echo "</select>";
         }
@@ -477,13 +531,10 @@ function get_list_view_data(PDO $pdo, array $config)
     $from = $total ? ($offset + 1) : 0;
     $to   = $total ? min($offset + $per_page, $total) : 0;
 
-    // Build per_page <form> preserving current params
     ob_start();
     echo "<div class='d-flex flex-column flex-sm-row justify-content-between align-items-center gap-2 mt-3'>";
-    // Left: range + total
     echo "<div class='text-muted'>Showing $from–$to of $total</div>";
 
-    // Middle: pager buttons
     $first_disabled = ($page <= 1) ? ' disabled' : '';
     $prev_disabled  = ($page <= 1) ? ' disabled' : '';
     $next_disabled  = ($page >= $total_pages) ? ' disabled' : '';
@@ -502,7 +553,6 @@ function get_list_view_data(PDO $pdo, array $config)
     echo "<li class='page-item$last_disabled'><a class='page-link' href='" . htmlspecialchars($qs_last) . "'>Last</a></li>";
     echo "</ul></nav>";
 
-    // Right: per-page selector (preserve params in hidden inputs)
     echo "<form method='GET' class='d-flex align-items-center gap-2'>";
     echo "<label class='form-label mb-0'>Rows per page</label>";
     echo "<select name='per_page' class='form-select form-select-sm' onchange='this.form.submit()'>";
@@ -511,18 +561,15 @@ function get_list_view_data(PDO $pdo, array $config)
         echo "<option value='$opt'$sel>$opt</option>";
     }
     echo "</select>";
-    // preserve all current GET except per_page and page and reset
     foreach ($_GET as $k => $v) {
         if (in_array($k, ['per_page', 'page', 'reset'], true)) continue;
         if (is_array($v)) continue;
         echo "<input type='hidden' name='" . htmlspecialchars($k, ENT_QUOTES) . "' value='" . htmlspecialchars($v, ENT_QUOTES) . "'>";
     }
     echo "</form>";
-
     echo "</div>";
     $pager_html = ob_get_clean();
 
-    // ---- Page meta for optional use
     $page_meta = [
         'total' => $total,
         'page' => $page,

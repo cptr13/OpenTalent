@@ -6,6 +6,7 @@ error_reporting(E_ALL);
 require_once __DIR__ . '/../includes/require_login.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ . '/../includes/status_badge.php'; // <- for contact_status_badge()
 
 $client_id = $_GET['id'] ?? null;
 
@@ -134,20 +135,29 @@ $stmt = $pdo->prepare("SELECT * FROM jobs WHERE client_id = ?");
 $stmt->execute([(int)$client_id]);
 $jobs = $stmt->fetchAll();
 
-// Contacts
-$stmt = $pdo->prepare("SELECT id, first_name, last_name, title, email FROM contacts WHERE client_id = ?");
+// Contacts (include contact_status)
+$stmt = $pdo->prepare("SELECT id, first_name, last_name, title, email, contact_status FROM contacts WHERE client_id = ?");
 $stmt->execute([(int)$client_id]);
 $contacts = $stmt->fetchAll();
 
+// NEW: Candidate↔Job associations for this client with per-association status
 $stmt = $pdo->prepare("
-    SELECT DISTINCT c.*
-    FROM candidates c
-    JOIN associations a ON a.candidate_id = c.id
-    JOIN jobs j ON j.id = a.job_id
+    SELECT 
+        a.id            AS association_id,
+        c.id            AS candidate_id,
+        c.first_name    AS candidate_first,
+        c.last_name     AS candidate_last,
+        j.id            AS job_id,
+        j.title         AS job_title,
+        a.status        AS assoc_status
+    FROM associations a
+    JOIN candidates c ON c.id = a.candidate_id
+    JOIN jobs j       ON j.id = a.job_id
     WHERE j.client_id = ?
+    ORDER BY a.created_at DESC, a.id DESC
 ");
 $stmt->execute([(int)$client_id]);
-$candidates = $stmt->fetchAll();
+$candidate_associations = $stmt->fetchAll();
 
 $primary_contact = null;
 if (!empty($client['primary_contact_id'])) {
@@ -254,10 +264,11 @@ $docCategories = [
     </div>
 
     <?php
+    // Build sections; Associated Candidates now uses per-association rows with status and job title.
     $sections = [
         'Associated Contacts'   => ['items' => $contacts,   'url' => "add_contact.php?client_id=".(int)$client['id'], 'label' => '+ Associate Contact',  'view' => 'contact'],
         'Associated Job Orders' => ['items' => $jobs,       'url' => "add_job.php?client_id=".(int)$client['id']."&client_name=" . urlencode((string)$client['name']), 'label' => '+ Create Job Order', 'view' => 'job'],
-        'Associated Candidates' => ['items' => $candidates, 'url' => "assign.php?client_id=".(int)$client['id'], 'label' => '+ Associate Candidate', 'view' => 'candidate'],
+        'Associated Candidates' => ['items' => $candidate_associations, 'url' => "assign.php?client_id=".(int)$client['id'], 'label' => '+ Associate Candidate', 'view' => 'candidate_assoc'],
     ];
     foreach ($sections as $title => $data):
     ?>
@@ -273,21 +284,43 @@ $docCategories = [
                     <ul class="list-group">
                         <?php foreach ($data['items'] as $item): ?>
                             <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <div>
-                                    <a href="view_<?= h($data['view']) ?>.php?id=<?= (int)$item['id'] ?>">
-                                        <strong><?= h(label_item($item)) ?></strong>
-                                    </a>
-                                    <?php if ($data['view'] === 'contact' && !empty($item['title'])): ?>
-                                        <span class="text-muted ms-1">— <?= h($item['title']) ?></span>
-                                    <?php elseif (!empty($item['title'])): ?>
-                                        <div class="text-muted small"><?= h($item['title']) ?></div>
+                                <div class="text-truncate">
+                                    <?php if ($data['view'] === 'candidate_assoc'): ?>
+                                        <!-- Candidate Name (link) • Job Title (link) -->
+                                        <a href="view_candidate.php?id=<?= (int)$item['candidate_id'] ?>">
+                                            <strong><?= h(trim(($item['candidate_first'] ?? '') . ' ' . ($item['candidate_last'] ?? ''))) ?></strong>
+                                        </a>
+                                        <span class="text-muted"> • </span>
+                                        <a href="view_job.php?id=<?= (int)$item['job_id'] ?>" class="text-decoration-none">
+                                            <?= h($item['job_title'] ?? '') ?>
+                                        </a>
+                                    <?php else: ?>
+                                        <a href="view_<?= h($data['view']) ?>.php?id=<?= (int)$item['id'] ?>">
+                                            <strong><?= h(label_item($item)) ?></strong>
+                                        </a>
+                                        <?php if ($data['view'] === 'contact' && !empty($item['title'])): ?>
+                                            <span class="text-muted ms-1">— <?= h($item['title']) ?></span>
+                                        <?php elseif (!empty($item['title'])): ?>
+                                            <div class="text-muted small"><?= h($item['title']) ?></div>
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                 </div>
-                                <?php if (!empty($item['status'])): ?>
-                                    <span class="badge bg-secondary">...</span>
-                                <?php elseif (!empty($item['email'])): ?>
-                                    <span><?= h($item['email']) ?></span>
-                                <?php endif; ?>
+
+                                <div class="text-nowrap">
+                                    <?php if ($data['view'] === 'contact'): ?>
+                                        <?= contact_status_badge($item['contact_status'] ?? null, 'sm') ?>
+                                    <?php elseif ($data['view'] === 'candidate_assoc'): ?>
+                                        <?= contact_status_badge($item['assoc_status'] ?? null, 'sm') ?>
+                                    <?php else: ?>
+                                        <?php if (!empty($item['status'])): ?>
+                                            <span class="badge bg-secondary"><?= h($item['status']) ?></span>
+                                        <?php elseif (!empty($item['email'])): ?>
+                                            <span><?= h($item['email']) ?></span>
+                                        <?php else: ?>
+                                            <span class="text-muted">—</span>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                </div>
                             </li>
                         <?php endforeach; ?>
                     </ul>

@@ -81,6 +81,18 @@ if (!$candidate) {
     exit;
 }
 
+// ---- Email compose link (uses compose_email.php) ----
+$full_name = trim(($candidate['first_name'] ?? '') . ' ' . ($candidate['last_name'] ?? ''));
+$return_to = 'view_candidate.php?id=' . (int)$candidate['id'];
+$compose_params = [
+    'to'           => $candidate['email'] ?? '',
+    'name'         => $full_name,
+    'related_type' => 'candidate',
+    'related_id'   => (int)$candidate['id'],
+    'return_to'    => $return_to,
+];
+$email_url = 'compose_email.php?' . http_build_query($compose_params);
+
 $error = '';
 $flash_message = $_GET['msg'] ?? null;
 
@@ -171,8 +183,15 @@ $associations = $stmt->fetchAll();
     <?php endif; ?>
 
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2><?= h(($candidate['first_name'] ?? '') . ' ' . ($candidate['last_name'] ?? '')) ?></h2>
-        <a href="edit_candidate.php?id=<?= (int)$candidate['id'] ?>" class="btn btn-sm btn-primary">Edit</a>
+        <h2 class="mb-0"><?= h(($candidate['first_name'] ?? '') . ' ' . ($candidate['last_name'] ?? '')) ?></h2>
+        <div class="d-flex gap-2">
+            <?php if (!empty($candidate['email'])): ?>
+                <a href="<?= h($email_url) ?>" class="btn btn-sm btn-outline-primary">Email</a>
+            <?php else: ?>
+                <button class="btn btn-sm btn-outline-secondary" disabled title="No email on file">Email</button>
+            <?php endif; ?>
+            <a href="edit_candidate.php?id=<?= (int)$candidate['id'] ?>" class="btn btn-sm btn-primary">Edit</a>
+        </div>
     </div>
 
     <div class="row g-4">

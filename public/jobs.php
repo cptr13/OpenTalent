@@ -1,4 +1,3 @@
-
 <?php
 
 require_once __DIR__ . '/../includes/require_login.php';
@@ -6,10 +5,12 @@ require_once '../includes/header.php';
 require_once '../config/database.php';
 require_once __DIR__ . '/../includes/list_view.php';
 require_once __DIR__ . '/../includes/sortable.php';
+require_once __DIR__ . '/../includes/status_badge.php'; // contact_status_badge()
 
 // Default to empty list in case of errors
 $jobs = [];
 $clientNames = [];
+$jobContacts = []; // job_id => ['id' => contact_id, 'name' => contact_name, 'status' => contact_status]
 
 // Config for Jobs list/filters
 $config = [
@@ -21,6 +22,7 @@ $config = [
         'status'     => 'Status',
         'created_at' => 'Created',
         // client_id not displayed in header; used for link mapping below
+        // Contact column is rendered from a separate lookup (keeps this step isolated)
     ],
     'filter_types' => [
         'title'      => 'text',
@@ -34,7 +36,7 @@ $config = [
 /**
  * Sort controls for header links
  * Keys must match what list_view.php expects in $_GET['sort'].
- * Company sorting needs a JOIN-aware change in list_view.php; we'll add that on request.
+ * NOTE: "Company" and "Contact" need JOIN-aware sorting in list_view.php to be sortable.
  */
 $ALLOWED_COLUMNS = [
     'title'      => 'title',
@@ -51,12 +53,18 @@ try {
 
     // Bulk-lookup client names for the rendered table (preserves your existing UI)
     $clientIds = [];
+    $jobIds = [];
     foreach ($jobs as $r) {
         if (!empty($r['client_id'])) {
             $clientIds[] = (int)$r['client_id'];
         }
+        if (!empty($r['id'])) {
+            $jobIds[] = (int)$r['id'];
+        }
     }
     $clientIds = array_values(array_unique(array_filter($clientIds)));
+    $jobIds    = array_values(array_unique(array_filter($jobIds)));
+
     if ($clientIds) {
         $in = implode(',', array_fill(0, count($clientIds), '?'));
         $stmt = $pdo->prepare("SELECT id, name FROM clients WHERE id IN ($in)");
@@ -64,6 +72,57 @@ try {
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as $row) {
             $clientNames[(int)$row['id']] = $row['name'];
+        }
+    }
+
+    // Bulk-lookup FIRST associated contact per job (by earliest link), including contact_status
+    if ($jobIds) {
+        $in = implode(',', array_fill(0, count($jobIds), '?'));
+        $sql = "
+            SELECT t.job_id,
+                   t.contact_id AS id,
+                   CONCAT(c.first_name, ' ', c.last_name) AS name,
+                   c.contact_status AS status
+            FROM (
+                SELECT jc.job_id, jc.contact_id,
+                       ROW_NUMBER() OVER (PARTITION BY jc.job_id ORDER BY jc.id ASC) AS rn
+                FROM job_contacts jc
+                WHERE jc.job_id IN ($in)
+            ) t
+            JOIN contacts c ON c.id = t.contact_id
+            WHERE t.rn = 1
+        ";
+        // MySQL 8+ supports ROW_NUMBER. If using MySQL 5.7, replace with MIN(id) subquery.
+        try {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($jobIds);
+        } catch (Throwable $e) {
+            // Fallback for older MySQL (no window functions)
+            $sqlFallback = "
+                SELECT jc.job_id,
+                       jc.contact_id AS id,
+                       CONCAT(c.first_name, ' ', c.last_name) AS name,
+                       c.contact_status AS status
+                FROM job_contacts jc
+                JOIN (
+                    SELECT job_id, MIN(id) AS min_link_id
+                    FROM job_contacts
+                    WHERE job_id IN ($in)
+                    GROUP BY job_id
+                ) first_link ON first_link.job_id = jc.job_id AND first_link.min_link_id = jc.id
+                JOIN contacts c ON c.id = jc.contact_id
+            ";
+            $stmt = $pdo->prepare($sqlFallback);
+            $stmt->execute($jobIds);
+        }
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            $jobContacts[(int)$row['job_id']] = [
+                'id'     => (int)$row['id'],
+                'name'   => (string)$row['name'],
+                'status' => (string)($row['status'] ?? ''),
+            ];
         }
     }
 } catch (Throwable $e) {
@@ -108,6 +167,7 @@ try {
                             </a>
                         </th>
                         <th>Company</th>
+                        <th>Contact</th>
                         <th>
                             <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('location')) ?>">
                                 Location<?= htmlspecialchars(($S['arrow'])('location')) ?>
@@ -130,7 +190,11 @@ try {
                     <?php if (!empty($jobs)): ?>
                         <?php foreach ($jobs as $job): ?>
                             <tr>
-                                <td><a href="view_job.php?id=<?= (int)$job['id'] ?>"><?= htmlspecialchars($job['title'] ?? '') ?></a></td>
+                                <td>
+                                    <a href="view_job.php?id=<?= (int)$job['id'] ?>">
+                                        <?= htmlspecialchars($job['title'] ?? '') ?>
+                                    </a>
+                                </td>
                                 <td>
                                     <?php
                                         $cid = isset($job['client_id']) ? (int)$job['client_id'] : 0;
@@ -138,6 +202,18 @@ try {
                                     ?>
                                     <?php if ($cid && $cname): ?>
                                         <a href="view_client.php?id=<?= $cid ?>"><?= htmlspecialchars($cname) ?></a>
+                                    <?php else: ?>
+                                        <span class="text-muted">—</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-nowrap">
+                                    <?php
+                                        $jid = (int)($job['id'] ?? 0);
+                                        $assoc = $jid && isset($jobContacts[$jid]) ? $jobContacts[$jid] : null;
+                                    ?>
+                                    <?php if ($assoc && !empty($assoc['name'])): ?>
+                                        <a href="view_contact.php?id=<?= (int)$assoc['id'] ?>"><?= htmlspecialchars($assoc['name']) ?></a>
+                                        <span class="ms-2"><?= contact_status_badge($assoc['status'] ?? null, 'sm') ?></span>
                                     <?php else: ?>
                                         <span class="text-muted">—</span>
                                     <?php endif; ?>
@@ -152,12 +228,12 @@ try {
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="6" class="text-center">No jobs found.</td>
+                            <td colspan="7" class="text-center">No jobs found.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
             </table>
-            <?= $pager_html ?>
+            <?= $pager_html ?? '' ?>
         </div>
     </main>
 </div>
@@ -341,4 +417,3 @@ try {
 </script>
 
 <?php require_once '../includes/footer.php'; ?>
-```

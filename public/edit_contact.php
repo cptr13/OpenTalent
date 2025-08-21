@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/require_login.php';
 require_once __DIR__ . '/../includes/header.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/status.php'; // for getStatusList('contact')
 
 $contact_id = $_GET['id'] ?? null;
 
@@ -25,20 +26,24 @@ if (!$contact) {
 // Fetch all clients for dropdown
 $clientStmt = $pdo->query("SELECT id, name FROM clients ORDER BY name ASC");
 $clients = $clientStmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Build contact status list (grouped by category)
+$contactStatusList = getStatusList('contact'); // ['Category' => ['Sub1', ...], ...]
+$currentContactStatus = $contact['contact_status'] ?? '';
 ?>
 
 <div class="container mt-5">
     <h2 class="mb-4">Edit Contact</h2>
 
     <form method="POST" action="update_contact.php">
-        <input type="hidden" name="id" value="<?= $contact['id'] ?>">
+        <input type="hidden" name="id" value="<?= htmlspecialchars($contact['id']) ?>">
 
         <div class="mb-3">
             <label for="client_id" class="form-label">Associated Client</label>
             <select name="client_id" id="client_id" class="form-select" required>
                 <option value="">Select a client</option>
                 <?php foreach ($clients as $client): ?>
-                    <option value="<?= $client['id'] ?>" <?= ($contact['client_id'] == $client['id']) ? 'selected' : '' ?>>
+                    <option value="<?= htmlspecialchars($client['id']) ?>" <?= ($contact['client_id'] == $client['id']) ? 'selected' : '' ?>>
                         <?= htmlspecialchars($client['name']) ?>
                     </option>
                 <?php endforeach; ?>
@@ -71,6 +76,24 @@ $clients = $clientStmt->fetchAll(PDO::FETCH_ASSOC);
             <input type="text" name="phone" id="phone" class="form-control" value="<?= htmlspecialchars($contact['phone']) ?>">
         </div>
 
+        <!-- Contact Status (entity-specific) -->
+        <div class="mb-3">
+            <label for="contact_status" class="form-label">Contact Status</label>
+            <select name="contact_status" id="contact_status" class="form-select" required>
+                <option value="">-- Select Status --</option>
+                <?php foreach ($contactStatusList as $category => $subs): ?>
+                    <optgroup label="<?= htmlspecialchars($category) ?>">
+                        <?php foreach ($subs as $sub): ?>
+                            <option value="<?= htmlspecialchars($sub) ?>" <?= ($currentContactStatus === $sub ? 'selected' : '') ?>>
+                                <?= htmlspecialchars($sub) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </optgroup>
+                <?php endforeach; ?>
+            </select>
+            <div class="form-text">Tracks the relationship state (separate from the outreach cadence).</div>
+        </div>
+
         <div class="mb-3">
             <label for="follow_up_date" class="form-label">Follow-Up Date</label>
             <input type="date" name="follow_up_date" id="follow_up_date" class="form-control" value="<?= htmlspecialchars($contact['follow_up_date'] ?? '') ?>">
@@ -94,10 +117,10 @@ $clients = $clientStmt->fetchAll(PDO::FETCH_ASSOC);
         <div class="mb-3">
             <label for="outreach_status" class="form-label">Outreach Status</label>
             <select name="outreach_status" id="outreach_status" class="form-select">
-                <option value="Active" <?= $contact['outreach_status'] === 'Active' ? 'selected' : '' ?>>Active</option>
-                <option value="On Hold" <?= $contact['outreach_status'] === 'On Hold' ? 'selected' : '' ?>>On Hold</option>
-                <option value="Unresponsive" <?= $contact['outreach_status'] === 'Unresponsive' ? 'selected' : '' ?>>Unresponsive</option>
-                <option value="Do Not Contact" <?= $contact['outreach_status'] === 'Do Not Contact' ? 'selected' : '' ?>>Do Not Contact</option>
+                <option value="Active" <?= ($contact['outreach_status'] === 'Active') ? 'selected' : '' ?>>Active</option>
+                <option value="Paused" <?= ($contact['outreach_status'] === 'Paused') ? 'selected' : '' ?>>Paused</option>
+                <option value="Do Not Contact" <?= ($contact['outreach_status'] === 'Do Not Contact') ? 'selected' : '' ?>>Do Not Contact</option>
+                <option value="Completed" <?= ($contact['outreach_status'] === 'Completed') ? 'selected' : '' ?>>Completed</option>
             </select>
         </div>
 
@@ -106,4 +129,3 @@ $clients = $clientStmt->fetchAll(PDO::FETCH_ASSOC);
 </div>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
-

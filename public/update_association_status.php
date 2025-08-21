@@ -34,27 +34,64 @@ try {
     }
 
     $old_status   = $assoc['status'] ?? null;
-    $candidate_id = (int)$assoc['candidate_id']; // trust DB for logging
+    $candidate_id = (int)$assoc['candidate_id']; // trust DB for logging/notes
     $job_id       = (int)$assoc['job_id'];
 
     // Update association status
     $stmt = $pdo->prepare("UPDATE associations SET status = ? WHERE id = ?");
     $stmt->execute([$new_status, $association_id]);
 
-    // Log KPI event (no-op if not KPI-mapped or already credited)
-    $user_id = $_SESSION['user_id'] ?? null;
-    kpi_log_status_change($pdo, $candidate_id, $job_id, $new_status, $old_status, $user_id);
+    // Log KPI event (correct signature/order)
+    $user_id = $_SESSION['user_id'] ?? ($_SESSION['user']['id'] ?? null);
+    $user_id = (is_numeric($user_id) && (int)$user_id > 0) ? (int)$user_id : null;
 
-    // Save optional note
+    // kpi_log_status_change(PDO $pdo, int $association_id, int $candidate_id, int $job_id, string $new_status, string $old_status, ?int $user_id)
+    kpi_log_status_change(
+        $pdo,
+        (int)$association_id,
+        (int)$candidate_id,
+        (int)$job_id,
+        (string)$new_status,
+        (string)$old_status,
+        $user_id
+    );
+
+    // Auto-note when status actually changed (attach to candidate)
+    if ($old_status !== $new_status) {
+        // Optional: pull job title for context
+        $job_title = '';
+        if ($job_id > 0) {
+            $jt = $pdo->prepare("SELECT title FROM jobs WHERE id = ?");
+            $jt->execute([$job_id]);
+            $job_title = (string)($jt->fetchColumn() ?: '');
+        }
+
+        $auto_note = "Status changed: " . (string)$old_status . " → " . (string)$new_status;
+        if ($job_id > 0) {
+            $auto_note .= $job_title !== ''
+                ? " (Job: {$job_title} #{$job_id})"
+                : " (Job ID: {$job_id})";
+        }
+
+        $stmt = $pdo->prepare(
+            "INSERT INTO notes (module_type, module_id, content, created_at)
+             VALUES ('candidate', :module_id, :content, NOW())"
+        );
+        $stmt->execute([
+            ':module_id' => $candidate_id,
+            ':content'   => $auto_note
+        ]);
+    }
+
+    // Save optional manual note (attach to candidate, not association)
     if ($note_content !== '') {
         $stmt = $pdo->prepare(
             "INSERT INTO notes (module_type, module_id, content, created_at)
-             VALUES (:module_type, :module_id, :content, NOW())"
+             VALUES ('candidate', :module_id, :content, NOW())"
         );
         $stmt->execute([
-            ':module_type' => 'association',
-            ':module_id'   => $association_id,
-            ':content'     => $note_content
+            ':module_id' => $candidate_id,
+            ':content'   => $note_content
         ]);
     }
 

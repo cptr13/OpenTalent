@@ -13,7 +13,7 @@ if (file_exists($lockFile)) {
 $phpOk = version_compare(PHP_VERSION, '7.4.0', '>=');
 
 $configWritable = is_writable(__DIR__ . '/../config');
-$uploadsWritable = is_writable(__DIR__ . '/uploads');
+$uploadsWritable = is_writable(__DIR__ . '/../uploads');
 
 $requirements = [
     'PHP Version (>= 7.4 and < 8.3)' => $phpOk,

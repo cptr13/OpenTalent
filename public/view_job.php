@@ -6,6 +6,7 @@ error_reporting(E_ALL);
 require_once __DIR__ . '/../includes/require_login.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ . '/../includes/status_badge.php'; // for contact_status_badge()
 
 $job_id = $_GET['id'] ?? null;
 $error = '';
@@ -60,13 +61,14 @@ $stmt = $pdo->prepare("
 $stmt->execute([$job_id]);
 $assigned = $stmt->fetchAll();
 
-// Assigned contacts
+// Assigned contacts (include contact_status)
 $stmt = $pdo->prepare("
     SELECT contacts.id,
            CONCAT(contacts.first_name, ' ', contacts.last_name) AS name,
            contacts.title,
            contacts.email,
-           contacts.phone
+           contacts.phone,
+           contacts.contact_status
     FROM job_contacts
     JOIN contacts ON job_contacts.contact_id = contacts.id
     WHERE job_contacts.job_id = ?
@@ -158,15 +160,20 @@ $status_options = [
                 <li class="list-group-item text-muted">No contacts assigned to this job.</li>
             <?php else: ?>
                 <?php foreach ($contacts as $contact): ?>
-                    <li class="list-group-item">
-                        <a href="view_contact.php?id=<?= $contact['id'] ?>">
-                            <?= htmlspecialchars($contact['name'] ?? 'Unnamed Contact') ?>
-                        </a>
-                        <?php if (!empty($contact['title'])): ?>
-                            – <?= htmlspecialchars($contact['title']) ?>
-                        <?php endif; ?>
-                        <br>
-                        <small><?= htmlspecialchars($contact['email'] ?? '') ?></small>
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <a href="view_contact.php?id=<?= $contact['id'] ?>">
+                                <?= htmlspecialchars($contact['name'] ?? 'Unnamed Contact') ?>
+                            </a>
+                            <?php if (!empty($contact['title'])): ?>
+                                – <?= htmlspecialchars($contact['title']) ?>
+                            <?php endif; ?>
+                            <br>
+                            <small><?= htmlspecialchars($contact['email'] ?? '') ?></small>
+                        </div>
+                        <div class="text-nowrap">
+                            <?= contact_status_badge($contact['contact_status'] ?? null, 'sm') ?>
+                        </div>
                     </li>
                 <?php endforeach; ?>
             <?php endif; ?>

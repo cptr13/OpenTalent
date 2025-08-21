@@ -1,7 +1,8 @@
 <?php
 require_once __DIR__ . '/../includes/require_login.php';
-require_once '../config/database.php';
-require_once '../includes/header.php';
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ . '/../includes/kpi_logger.php'; // <-- add KPI logger
 
 $statusList = require __DIR__ . '/../config/status_list.php';
 
@@ -20,7 +21,7 @@ if ($prefill_candidate_id) {
     $stmt = $pdo->prepare("SELECT first_name, last_name FROM candidates WHERE id = ?");
     $stmt->execute([$prefill_candidate_id]);
     if ($row = $stmt->fetch()) {
-        $prefill_candidate_name = trim($row['first_name'] . ' ' . $row['last_name']);
+        $prefill_candidate_name = trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''));
     }
 }
 
@@ -29,7 +30,7 @@ if ($prefill_contact_id) {
     $stmt = $pdo->prepare("SELECT full_name FROM contacts WHERE id = ?");
     $stmt->execute([$prefill_contact_id]);
     if ($row = $stmt->fetch()) {
-        $prefill_contact_name = $row['full_name'];
+        $prefill_contact_name = $row['full_name'] ?? '';
     }
 }
 
@@ -38,23 +39,39 @@ if ($prefill_job_id) {
     $stmt = $pdo->prepare("SELECT title FROM jobs WHERE id = ?");
     $stmt->execute([$prefill_job_id]);
     if ($row = $stmt->fetch()) {
-        $prefill_job_title = $row['title'];
+        $prefill_job_title = $row['title'] ?? '';
     }
 }
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $candidate_id = $_POST['candidate_id'] ?? null;
-    $contact_id = $_POST['contact_id'] ?? null;
-    $job_id = $_POST['job_id'] ?? null;
-    $status = $_POST['status'] ?? 'Screening: Associated to Job';
+    $candidate_id = isset($_POST['candidate_id']) ? (int)$_POST['candidate_id'] : null;
+    $contact_id   = isset($_POST['contact_id']) ? (int)$_POST['contact_id'] : null;
+    $job_id       = isset($_POST['job_id']) ? (int)$_POST['job_id'] : null;
+    // Note: your default option text in the select is "Associated to Job" (no prefix).
+    $status       = isset($_POST['status']) ? trim($_POST['status']) : 'Associated to Job';
 
     if ($candidate_id && $job_id) {
         try {
-            $stmt = $pdo->prepare("INSERT INTO associations (candidate_id, job_id, status, assigned_at) VALUES (?, ?, ?, NOW())");
+            // Create association
+            $stmt = $pdo->prepare("
+                INSERT INTO associations (candidate_id, job_id, status, assigned_at)
+                VALUES (?, ?, ?, NOW())
+            ");
             $stmt->execute([$candidate_id, $job_id, $status]);
 
-            $association_id = $pdo->lastInsertId();
+            $association_id = (int)$pdo->lastInsertId();
+
+            // Log initial recruiting KPI (only logs if mapped; skips if bucket = 'none')
+            $user_id = $_SESSION['user_id'] ?? ($_SESSION['user']['id'] ?? null);
+            try {
+                // kpi_logger expects: (pdo, association_id, candidate_id, job_id, new_status, old_status=null, changed_by)
+                kpi_log_status_change($pdo, $association_id, $candidate_id, $job_id, $status, null, $user_id);
+            } catch (Throwable $e) {
+                // Don't break association flow if KPI logging fails
+                // error_log('KPI recruiting log failed on associate.php: ' . $e->getMessage());
+            }
+
             header("Location: view_candidate.php?id=" . urlencode($candidate_id) . "&open_assoc=" . urlencode($association_id));
             exit;
         } catch (PDOException $e) {
@@ -108,14 +125,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <select name="status" id="status" class="form-select">
                 <?php foreach ($statusList as $category => $statuses): ?>
                     <optgroup label="<?= htmlspecialchars($category) ?>">
-                        <?php foreach ($statuses as $status): ?>
-                            <option value="<?= htmlspecialchars($status) ?>" <?= $status === 'Associated to Job' ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($status) ?>
+                        <?php foreach ($statuses as $s): ?>
+                            <option value="<?= htmlspecialchars($s) ?>" <?= $s === 'Associated to Job' ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($s) ?>
                             </option>
                         <?php endforeach; ?>
                     </optgroup>
                 <?php endforeach; ?>
             </select>
+            <div class="form-text">
+                Note: Only KPI‑mapped statuses (e.g., “Attempted to Contact”, “Screening / Conversation”) will log to the tracker. “Associated to Job” won’t count (by design).
+            </div>
         </div>
 
         <!-- Contact -->
@@ -197,10 +217,10 @@ function setupAutocomplete(inputId, resultsId, hiddenId, endpoint) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-   setupAutocomplete('candidate_search', 'candidate_results', 'candidate_id', '/OT-Master/ajax/search_candidates.php');
-setupAutocomplete('job_search', 'job_results', 'job_id', '/OT-Master/ajax/search_jobs.php');
-setupAutocomplete('contact_search', 'contact_results', 'contact_id', '/OT-Master/ajax/search_contacts.php');
+    setupAutocomplete('candidate_search', 'candidate_results', 'candidate_id', '/OT-Master/ajax/search_candidates.php');
+    setupAutocomplete('job_search', 'job_results', 'job_id', '/OT-Master/ajax/search_jobs.php');
+    setupAutocomplete('contact_search', 'contact_results', 'contact_id', '/OT-Master/ajax/search_contacts.php');
 });
 </script>
 
-<?php require_once '../includes/footer.php'; ?>
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>

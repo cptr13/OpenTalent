@@ -46,3 +46,7 @@ public/uploads/
 # Secrets
 /config/email.php
 /config/database.php
+/uploads/*
+\!/uploads/.gitkeep
+/uploads/*
+!/uploads/.gitkeep

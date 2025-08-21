@@ -2,6 +2,11 @@
 require_once __DIR__ . '/../includes/require_login.php';
 require_once __DIR__ . '/../includes/header.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/status.php'; // for getStatusList('contact')
+
+// Build contact status list (grouped by category)
+$contactStatusList = getStatusList('contact'); // ['Category' => ['Sub1', ...], ...]
+$defaultContactStatus = 'New Contact';
 
 $prefill_client_name = '';
 $prefill_client_id = $_GET['client_id'] ?? '';
@@ -54,6 +59,24 @@ if ($prefill_client_id) {
             <input type="text" name="phone" id="phone" class="form-control">
         </div>
 
+        <!-- Contact Status (entity-specific) -->
+        <div class="mb-3">
+            <label for="contact_status" class="form-label">Contact Status</label>
+            <select name="contact_status" id="contact_status" class="form-select" required>
+                <option value="">-- Select Status --</option>
+                <?php foreach ($contactStatusList as $category => $subs): ?>
+                    <optgroup label="<?= htmlspecialchars($category) ?>">
+                        <?php foreach ($subs as $sub): ?>
+                            <option value="<?= htmlspecialchars($sub) ?>" <?= ($sub === $defaultContactStatus ? 'selected' : '') ?>>
+                                <?= htmlspecialchars($sub) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </optgroup>
+                <?php endforeach; ?>
+            </select>
+            <div class="form-text">This is separate from outreach cadence; it reflects the overall relationship state.</div>
+        </div>
+
         <div class="mb-3">
             <label for="follow_up_date" class="form-label">Follow-Up Date</label>
             <input type="date" name="follow_up_date" id="follow_up_date" class="form-control">
@@ -78,9 +101,9 @@ if ($prefill_client_id) {
             <label for="outreach_status" class="form-label">Outreach Status</label>
             <select name="outreach_status" id="outreach_status" class="form-select">
                 <option value="Active" selected>Active</option>
-                <option value="On Hold">On Hold</option>
-                <option value="Unresponsive">Unresponsive</option>
+                <option value="Paused">Paused</option>
                 <option value="Do Not Contact">Do Not Contact</option>
+                <option value="Completed">Completed</option>
             </select>
         </div>
 
@@ -110,4 +133,3 @@ $(function() {
 </script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
-

@@ -1,7 +1,7 @@
 -- Disable foreign key checks during table creation
 SET FOREIGN_KEY_CHECKS = 0;
 
--- Users table
+-- Users
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   full_name VARCHAR(255) NOT NULL,
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS candidates (
   contract_filename VARCHAR(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Clients table
+-- Clients
 CREATE TABLE IF NOT EXISTS clients (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
@@ -69,10 +69,11 @@ CREATE TABLE IF NOT EXISTS clients (
     REFERENCES contacts(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Contacts table
+-- Contacts
 CREATE TABLE IF NOT EXISTS contacts (
   id INT AUTO_INCREMENT PRIMARY KEY,
   client_id INT(11) DEFAULT NULL,
+  contact_status VARCHAR(128) DEFAULT NULL,
   first_name VARCHAR(100) NOT NULL,
   last_name VARCHAR(100) NOT NULL,
   full_name VARCHAR(255) DEFAULT NULL,
@@ -101,7 +102,7 @@ CREATE TABLE IF NOT EXISTS contacts (
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Jobs table
+-- Jobs
 CREATE TABLE IF NOT EXISTS jobs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   title VARCHAR(255) NOT NULL,
@@ -114,7 +115,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Association Table
+-- Associations (Candidate ↔ Job)
 CREATE TABLE IF NOT EXISTS associations (
   id INT AUTO_INCREMENT PRIMARY KEY,
   candidate_id INT NOT NULL,
@@ -127,7 +128,7 @@ CREATE TABLE IF NOT EXISTS associations (
   FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Notes table
+-- Notes
 CREATE TABLE IF NOT EXISTS notes (
   id INT AUTO_INCREMENT PRIMARY KEY,
   module_type VARCHAR(100) NOT NULL DEFAULT 'general',
@@ -144,7 +145,7 @@ CREATE TABLE IF NOT EXISTS notes (
   INDEX idx_contact_id (contact_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Attachments table
+-- Attachments
 CREATE TABLE IF NOT EXISTS attachments (
   id INT AUTO_INCREMENT PRIMARY KEY,
   candidate_id INT DEFAULT NULL,
@@ -164,7 +165,7 @@ CREATE TABLE IF NOT EXISTS job_contacts (
   FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Outreach Templates Structure
+-- Outreach Templates
 CREATE TABLE IF NOT EXISTS outreach_templates (
   id INT AUTO_INCREMENT PRIMARY KEY,
   stage_number INT(11) NOT NULL,
@@ -173,145 +174,148 @@ CREATE TABLE IF NOT EXISTS outreach_templates (
   body TEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Outreach Templates content
-INSERT INTO outreach_templates (id, stage_number, channel, subject, body) VALUES
-(1, 1, 'email', 'Connecting About Hiring Support at {{company_name}}', 
+-- (Optional) Outreach Templates content seed
+INSERT IGNORE INTO outreach_templates (id, stage_number, channel, subject, body) VALUES
+(1, 1, 'email', 'Connecting About Hiring Support at {{company_name}}',
 'Hi {{first_name}},\n\nI’m reaching out to introduce myself — I run a recruiting firm that helps companies like {{company_name}} find top talent across technology, engineering, operations, and finance.\n\nWould you be open to a quick call this week to see if we might be a fit as a recruiting partner?\n\nBest regards,\n{{your_name}}\n{{your_agency}}'),
-(2, 2, 'linkedin', NULL, 
+(2, 2, 'linkedin', NULL,
 'Hi {{first_name}}, I sent a quick note via email and wanted to connect here as well. I’d love to hear how you’re handling talent acquisition at {{company_name}}.'),
-(3, 3, 'email', 'Following Up on My Note', 
+(3, 3, 'email', 'Following Up on My Note',
 'Hi {{first_name}},\n\nJust following up on my earlier note. My firm provides highly targeted recruiting across professional and technical roles, including direct hire, contract, and interim.\n\nWould it make sense to connect for a few minutes this week?\n\nThanks again,\n{{your_name}}'),
-(4, 4, 'linkedin', NULL, 
+(4, 4, 'linkedin', NULL,
 'Hey {{first_name}}, just checking in again. I\'m happy to share a bit more about how we support hiring teams like yours.'),
-(5, 5, 'email', 'Talent Gaps at {{company_name}}?', 
+(5, 5, 'email', 'Talent Gaps at {{company_name}}?',
 'Hi {{first_name}},\n\nIs your team facing any hiring challenges right now? We help companies like {{company_name}} fill hard-to-find roles quickly without sacrificing quality.\n\nLet me know if it’s worth a quick chat.\n\nBest,\n{{your_name}}'),
-(6, 6, 'linkedin', NULL, 
+(6, 6, 'linkedin', NULL,
 'Still open to a quick conversation, {{first_name}}? Even if there’s nothing urgent, I’d love to learn about your team and keep in touch.'),
-(7, 7, 'email', 'Still Worth a Quick Chat?', 
+(7, 7, 'email', 'Still Worth a Quick Chat?',
 'Hi {{first_name}},\n\nI’m still hopeful we can connect. I understand timing is everything. Even if now isn’t ideal, I’d love to introduce what we do and stay in touch for when needs arise.\n\nThanks for considering,\n{{your_name}}'),
-(8, 8, 'linkedin', NULL, 
+(8, 8, 'linkedin', NULL,
 'Hi {{first_name}}, I’ll stop chasing for now. If it ever makes sense to connect about talent strategy or hiring support, we’re here to help.'),
-(9, 9, 'email', 'Final Follow-Up (For Now)', 
+(9, 9, 'email', 'Final Follow-Up (For Now)',
 'Hi {{first_name}},\n\nThis will be my last outreach for now. If you’re ever open to chatting about talent needs, even informally, I’d be happy to connect.\n\nWishing you continued success,\n{{your_name}}\n{{your_agency}}'),
-(10, 10, 'linkedin', NULL, 
+(10, 10, 'linkedin', NULL,
 'Just one last ping in case this got buried. I\'m happy to step back and reconnect down the road if that’s better timing.'),
-(11, 11, 'call', NULL, 
+(11, 11, 'call', NULL,
 'Hi {{first_name}}, this is {{your_name}} with {{your_agency}}. I sent over a couple of notes recently and just wanted to quickly introduce myself and see if there’s ever a chance we could support your hiring efforts. You can reach me directly at {{your_phone}}. Thanks!'),
-(12, 12, 'email', 'Should I Stay on Your Radar?', 
+(12, 12, 'email', 'Should I Stay on Your Radar?',
 'Hi {{first_name}},\n\nI haven’t heard back, and that’s completely okay. I know how busy things get.\n\nWould it be helpful if I checked back in a few months, or would you prefer I hold off? Either way, wishing you all the best in your role.\n\n– {{your_name}}');
 
 -- KPI / Quota Tracking
 
--- Status mapping for KPI counting
 CREATE TABLE IF NOT EXISTS kpi_status_map (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  module ENUM('recruiting','sales') NOT NULL DEFAULT 'recruiting',
+  module ENUM('recruiting','sales') NOT NULL,
   status_name VARCHAR(100) NOT NULL,
-  kpi_bucket ENUM('contact_attempt','conversation','submittal','interview','placement','none') NOT NULL DEFAULT 'none',
+  kpi_bucket ENUM(
+    'contact_attempts',
+    'conversations',
+    'submittals',
+    'interviews',
+    'offers_made',
+    'hires',
+    'opportunities_identified',
+    'meetings',
+    'agreements_signed',
+    'job_orders_received',
+    'none'
+  ) NOT NULL DEFAULT 'none',
   event_type VARCHAR(100) NULL,
   UNIQUE KEY uniq_module_status (module, status_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Event history (logged on status changes)
+-- Canonical status history (no triggers; compatible with PDO/schema runners)
 CREATE TABLE IF NOT EXISTS status_history (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
-  candidate_id INT NOT NULL,
-  job_id INT NOT NULL,
-  new_status VARCHAR(100) NOT NULL,
-  kpi_bucket ENUM('contact_attempt','conversation','submittal','interview','placement','none') NOT NULL,
+  entity_type ENUM('candidate','contact','job') NOT NULL,
+  entity_id INT NOT NULL,
+  status_name VARCHAR(100) NOT NULL,
+  kpi_bucket VARCHAR(100) DEFAULT NULL,
   event_type VARCHAR(100) NULL,
   changed_by INT NULL,
-  changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_changed_at (changed_at),
-  INDEX idx_bucket_time (kpi_bucket, changed_at),
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- Legacy shim fields retained (not auto-synced without triggers)
+  candidate_id INT NULL,
+  job_id INT NULL,
+  new_status VARCHAR(100) NULL,
+  changed_at DATETIME NULL,
+  INDEX idx_entity_time (entity_type, entity_id, created_at),
+  INDEX idx_status_time (status_name, created_at),
   INDEX idx_cand_job_time (candidate_id, job_id, changed_at),
-  INDEX idx_event_time (event_type, changed_at),
-  CONSTRAINT fk_hist_user      FOREIGN KEY (changed_by)  REFERENCES users(id)      ON DELETE SET NULL,
-  CONSTRAINT fk_hist_candidate FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
-  CONSTRAINT fk_hist_job       FOREIGN KEY (job_id)       REFERENCES jobs(id)       ON DELETE CASCADE
+  INDEX idx_changed_at (changed_at),
+  CONSTRAINT fk_hist_user FOREIGN KEY (changed_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Quota goals (defaults at user_id IS NULL; per-user overrides allowed)
 CREATE TABLE IF NOT EXISTS kpi_goals (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NULL,
-  metric ENUM('contact_attempt','conversation','submittal','interview','placement') NOT NULL,
+  metric ENUM(
+    'contact_attempts',
+    'conversations',
+    'submittals',
+    'interviews',
+    'offers_made',
+    'hires',
+    'opportunities_identified',
+    'meetings',
+    'agreements_signed',
+    'job_orders_received'
+  ) NOT NULL,
   period ENUM('daily','weekly','monthly','quarterly','half_year','yearly') NOT NULL,
   goal INT NOT NULL DEFAULT 0,
-  INDEX idx_user_metric_period (user_id, metric, period),
+  UNIQUE KEY uniq_metric_period_user (metric, period, user_id),
   CONSTRAINT fk_goals_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Seed status → KPI mappings (idempotent)
 INSERT IGNORE INTO kpi_status_map (module, status_name, kpi_bucket, event_type) VALUES
-('recruiting','New','none',NULL),
-('recruiting','Associated to Job','none',NULL),
-('recruiting','Attempted to Contact','contact_attempt',NULL),
-('recruiting','Contacted','contact_attempt',NULL),
-('recruiting','Screening / Conversation','conversation',NULL),
-('recruiting','No-Show','none',NULL),
-('recruiting','Interview to be Scheduled','none',NULL),
-('recruiting','Interview Scheduled','interview','interview_scheduled'),
-('recruiting','Waiting on Client Feedback','none',NULL),
-('recruiting','Second Interview to be Scheduled','none',NULL),
-('recruiting','Second Interview Scheduled','interview','second_interview_scheduled'),
-('recruiting','Submitted to Client','submittal',NULL),
-('recruiting','Approved by Client','none',NULL),
-('recruiting','To be Offered','none',NULL),
-('recruiting','Offer Made','none',NULL),
-('recruiting','Offer Accepted','none',NULL),
-('recruiting','Offer Declined','none',NULL),
-('recruiting','Offer Withdrawn','none',NULL),
-('recruiting','Hired','placement',NULL),
-('recruiting','On Hold','none',NULL),
-('recruiting','Position Closed','none',NULL),
-('recruiting','Contact in Future','none',NULL),
-('recruiting','Rejected','none',NULL),
-('recruiting','Rejected – By Client','none',NULL),
-('recruiting','Rejected – For Interview','none',NULL),
-('recruiting','Rejected – Hirable','none',NULL),
-('recruiting','Unqualified','none',NULL),
-('recruiting','Not Interested','none',NULL),
-('recruiting','Ghosted','none',NULL),
-('recruiting','Paused by Candidate','none',NULL),
-('recruiting','Withdrawn by Candidate','none',NULL);
+-- Recruiting statuses
+('recruiting','Attempted to Contact','contact_attempts','status_change'),
+('recruiting','Contacted','contact_attempts',NULL),
+('recruiting','Screening / Conversation','conversations',NULL),
+('recruiting','Submitted to Client','submittals',NULL),
+('recruiting','Interview Scheduled','interviews','interview_scheduled'),
+('recruiting','Second Interview Scheduled','interviews','second_interview_scheduled'),
+('recruiting','Offer Made','offers_made',NULL),
+('recruiting','Offer Accepted','offers_made',NULL),
+('recruiting','Hired','hires',NULL),
+-- Sales statuses
+('sales','Opportunity Identified','opportunities_identified',NULL),
+('sales','Meeting Scheduled','meetings',NULL),
+('sales','Agreement Signed','agreements_signed',NULL),
+('sales','Job Order Received','job_orders_received',NULL),
+-- Added during debugging to match your actual contact workflow
+('sales','Conversation Started','conversations',NULL),
+('sales','Attempted to Contact','contact_attempts',NULL);
 
--- Seed default goals (idempotent)
+-- Seed default KPI goals (agency-level)
 INSERT IGNORE INTO kpi_goals (user_id, metric, period, goal) VALUES
-(NULL,'contact_attempt','daily',50),
-(NULL,'contact_attempt','weekly',250),
-(NULL,'contact_attempt','monthly',1000),
-(NULL,'contact_attempt','quarterly',3000),
-(NULL,'contact_attempt','half_year',6000),
-(NULL,'contact_attempt','yearly',12000),
-(NULL,'conversation','daily',5),
-(NULL,'conversation','weekly',25),
-(NULL,'conversation','monthly',100),
-(NULL,'conversation','quarterly',300),
-(NULL,'conversation','half_year',600),
-(NULL,'conversation','yearly',1200),
-(NULL,'submittal','daily',1),
-(NULL,'submittal','weekly',5),
-(NULL,'submittal','monthly',20),
-(NULL,'submittal','quarterly',60),
-(NULL,'submittal','half_year',120),
-(NULL,'submittal','yearly',240),
-(NULL,'interview','daily',0),
-(NULL,'interview','weekly',2),
-(NULL,'interview','monthly',8),
-(NULL,'interview','quarterly',24),
-(NULL,'interview','half_year',48),
-(NULL,'interview','yearly',96),
-(NULL,'placement','daily',0),
-(NULL,'placement','weekly',0),
-(NULL,'placement','monthly',1),
-(NULL,'placement','quarterly',3),
-(NULL,'placement','half_year',6),
-(NULL,'placement','yearly',12);
+(NULL,'contact_attempts','daily',50),
+(NULL,'contact_attempts','weekly',250),
+(NULL,'conversations','daily',5),
+(NULL,'conversations','weekly',25),
+(NULL,'submittals','daily',1),
+(NULL,'submittals','weekly',15),
+(NULL,'interviews','weekly',10),
+(NULL,'offers_made','weekly',2),
+(NULL,'hires','monthly',1),
+(NULL,'opportunities_identified','weekly',10),
+(NULL,'meetings','weekly',8),
+(NULL,'agreements_signed','weekly',3),
+(NULL,'job_orders_received','weekly',3);
 
--- Insert default admin user
-INSERT INTO users (id, full_name, email, password, role, created_at, force_password_change) VALUES
-(1, 'Admin User', 'admin@example.com', '$2y$10$RYuAPo70Z5HB5NH.lLeZ9.NNPm0gmTixDAkM0pEfPQ88b1b65BZxm', 'admin', NOW(), 1);
+-- Idempotent default admin (survives re-runs and partial imports)
+INSERT INTO users (id, full_name, email, password, role, created_at, force_password_change)
+VALUES (
+  1,
+  'Admin User',
+  'admin@example.com',
+  '$2y$10$RYuAPo70Z5HB5NH.lLeZ9.NNPm0gmTixDAkM0pEfPQ88b1b65BZxm',
+  'admin',
+  NOW(),
+  1
+)
+ON DUPLICATE KEY UPDATE id = id;
 
 -- Re-enable foreign key checks
 SET FOREIGN_KEY_CHECKS = 1;
