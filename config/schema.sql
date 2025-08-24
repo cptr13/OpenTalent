@@ -155,6 +155,44 @@ CREATE TABLE IF NOT EXISTS attachments (
   FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -----------------------------
+-- Email Logs (outbound/inbound)
+-- -----------------------------
+CREATE TABLE IF NOT EXISTS email_logs (
+  id                   INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  direction            ENUM('outbound','inbound') NOT NULL DEFAULT 'outbound',
+  related_module       VARCHAR(50) DEFAULT NULL,
+  related_type         VARCHAR(50) DEFAULT NULL,           -- legacy/compat
+  related_id           INT UNSIGNED DEFAULT NULL,
+  from_name            VARCHAR(255) DEFAULT NULL,
+  from_email           VARCHAR(255) NOT NULL,
+  to_name              VARCHAR(255) DEFAULT NULL,
+  to_email             VARCHAR(255) DEFAULT NULL,          -- legacy/compat
+  to_emails            TEXT NULL,                          -- nullable for compat
+  cc_emails            TEXT DEFAULT NULL,
+  bcc_emails           TEXT DEFAULT NULL,
+  subject              VARCHAR(512) NOT NULL,
+  body_html            MEDIUMTEXT NULL,
+  body_text            MEDIUMTEXT NULL,
+  attachments          TEXT DEFAULT NULL,
+  headers_json         JSON DEFAULT NULL,
+  smtp_account         VARCHAR(100) DEFAULT NULL,
+  status               ENUM('queued','sent','failed') NOT NULL DEFAULT 'sent',
+  error                TEXT DEFAULT NULL,                  -- legacy/compat
+  error_message        TEXT DEFAULT NULL,
+  message_id           VARCHAR(255) DEFAULT NULL,
+  provider_message_id  VARCHAR(255) DEFAULT NULL,
+  created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at           DATETIME NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_message_id (message_id),
+  KEY idx_related_module_id (related_module, related_id),
+  KEY idx_related_type_id (related_type, related_id),
+  KEY idx_created_at (created_at),
+  KEY idx_status (status),
+  KEY idx_provider_msg (provider_message_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Job Contacts
 CREATE TABLE IF NOT EXISTS job_contacts (
   id INT AUTO_INCREMENT PRIMARY KEY,

@@ -52,44 +52,81 @@ function ot_build_mailer(PDO $pdo): PHPMailer {
 }
 
 /**
- * Insert an email log row into email_logs.
- * Only writes to the standalone email_logs table (no FKs).
+ * Log an email event using canonical columns.
+ * Accepts both canonical and legacy keys; stores only canonical fields.
  *
- * @param PDO   $pdo
- * @param array $log
- *   Keys (all optional except to_email/subject/body if you care about content):
- *     direction, related_type, related_id, from_name, from_email,
- *     to_name, to_email, subject, body_html, body_text,
- *     status, error, provider_message_id, headers_json (array|string)
+ * Canonical fields stored:
+ *   direction, related_module, related_id,
+ *   from_name, from_email, to_emails, cc_emails, bcc_emails,
+ *   subject, body_html, body_text, attachments, headers_json,
+ *   smtp_account, status, error_message, message_id, provider_message_id
  *
- * @return int Inserted log ID
+ * @return int Inserted row id
  */
-function ot_log_email(PDO $pdo, array $log): int {
-    $sql = "INSERT INTO email_logs
-        (direction, related_type, related_id, from_name, from_email, to_name, to_email, subject, body_html, body_text, status, error, provider_message_id, headers_json)
-        VALUES (:direction, :related_type, :related_id, :from_name, :from_email, :to_name, :to_email, :subject, :body_html, :body_text, :status, :error, :provider_message_id, :headers_json)";
+function ot_log_email(PDO $pdo, array $data): int {
+    // Canonical pulls (fallback to legacy keys if given)
+    $direction       = $data['direction']        ?? 'outbound';
+    $related_module  = $data['related_module']   ?? ($data['related_type'] ?? null);
+    $related_id      = array_key_exists('related_id', $data) ? (int)$data['related_id'] : null;
 
-    $headers = $log['headers_json'] ?? null;
-    if (is_array($headers)) {
-        $headers = json_encode($headers, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $from_name       = $data['from_name']        ?? null;
+    $from_email      = $data['from_email']       ?? null;
+
+    // Canonical uses to_emails (comma-separated). Accept single legacy to_email.
+    $to_emails       = $data['to_emails']        ?? ($data['to_email'] ?? null);
+    $cc_emails       = $data['cc_emails']        ?? null;
+    $bcc_emails      = $data['bcc_emails']       ?? null;
+
+    $subject         = $data['subject']          ?? '';
+    $body_html       = $data['body_html']        ?? null;
+    $body_text       = $data['body_text']        ?? null;
+    $attachments     = $data['attachments']      ?? null;
+
+    // headers_json may come in as array or JSON string; store as JSON string
+    $headers_json    = $data['headers_json']     ?? null;
+    if (is_array($headers_json)) {
+        $headers_json = json_encode($headers_json, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
+
+    $smtp_account    = $data['smtp_account']     ?? null;
+    $status          = $data['status']           ?? 'sent';
+    $error_message   = $data['error_message']    ?? ($data['error'] ?? null); // accept legacy 'error'
+    $message_id      = $data['message_id']       ?? null;
+    $provider_msg_id = $data['provider_message_id'] ?? null;
+
+    $sql = "
+        INSERT INTO email_logs
+        (direction, related_module, related_id,
+         from_name, from_email, to_emails, cc_emails, bcc_emails,
+         subject, body_html, body_text, attachments, headers_json,
+         smtp_account, status, error_message, message_id, provider_message_id, created_at)
+        VALUES
+        (:direction, :related_module, :related_id,
+         :from_name, :from_email, :to_emails, :cc_emails, :bcc_emails,
+         :subject, :body_html, :body_text, :attachments, :headers_json,
+         :smtp_account, :status, :error_message, :message_id, :provider_message_id, NOW())
+    ";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
-        ':direction'           => $log['direction']           ?? 'outbound',
-        ':related_type'        => $log['related_type']        ?? 'none',
-        ':related_id'          => $log['related_id']          ?? null,
-        ':from_name'           => $log['from_name']           ?? null,
-        ':from_email'          => $log['from_email']          ?? null,
-        ':to_name'             => $log['to_name']             ?? null,
-        ':to_email'            => $log['to_email']            ?? null,
-        ':subject'             => $log['subject']             ?? null,
-        ':body_html'           => $log['body_html']           ?? null,
-        ':body_text'           => $log['body_text']           ?? null,
-        ':status'              => $log['status']              ?? 'sent',
-        ':error'               => $log['error']               ?? null,
-        ':provider_message_id' => $log['provider_message_id'] ?? null,
-        ':headers_json'        => $headers,
+        ':direction'           => $direction,
+        ':related_module'      => $related_module,
+        ':related_id'          => $related_id,
+        ':from_name'           => $from_name,
+        ':from_email'          => $from_email,
+        ':to_emails'           => $to_emails,
+        ':cc_emails'           => $cc_emails,
+        ':bcc_emails'          => $bcc_emails,
+        ':subject'             => $subject,
+        ':body_html'           => $body_html,
+        ':body_text'           => $body_text,
+        ':attachments'         => $attachments,
+        ':headers_json'        => $headers_json,
+        ':smtp_account'        => $smtp_account,
+        ':status'              => $status,
+        ':error_message'       => $error_message,
+        ':message_id'          => $message_id,
+        ':provider_message_id' => $provider_msg_id,
     ]);
 
     return (int)$pdo->lastInsertId();
