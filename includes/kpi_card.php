@@ -124,21 +124,22 @@ if (session_status() === PHP_SESSION_NONE) {
     hires:             'Hires',
 
     // Sales
-    opportunities_identified: 'Opportunities Identified',
-    meetings:                 'Meetings',
-    agreements_signed:        'Agreements Signed',
-    job_orders_received:      'Job Orders Received'
+    leads_added:            'Leads Added',
+    agreements_signed:      'Agreements Signed',
+    job_orders_received:    'Job Orders Received',
+    contact_attempts:       'Contact Attempts',   // already present above, kept for clarity
+    conversations:          'Conversations'       // already present above, kept for clarity
   };
 
   // Grouping for the main table (reads from the correct domain source)
   const GROUPS = [
     { title: 'Recruiting Metrics', domain: 'recruiting', order: ['contact_attempts','conversations','submittals','interviews','offers_made','hires'] },
-    { title: 'Sales Metrics',      domain: 'sales',      order: ['contact_attempts','conversations','opportunities_identified','meetings','agreements_signed','job_orders_received'] }
+    { title: 'Sales Metrics',      domain: 'sales',      order: ['leads_added','contact_attempts','conversations','agreements_signed','job_orders_received'] }
   ];
 
   // Today ribbon: show selected daily targets
   const RIBBON_RECRUITING_DAILY = ['contact_attempts','conversations','submittals'];
-  const RIBBON_SALES_DAILY      = ['contact_attempts','conversations','opportunities_identified'];
+  const RIBBON_SALES_DAILY      = ['leads_added','contact_attempts','conversations'];
 
   function clip(n){ return Math.max(0, Math.min(100, Math.round(n))); }
   function pct(v,g){ if(!g || g<=0) return (v>0?100:0); return clip((v/g)*100); }

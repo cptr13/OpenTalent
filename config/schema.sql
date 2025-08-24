@@ -214,10 +214,10 @@ CREATE TABLE IF NOT EXISTS kpi_status_map (
     'interviews',
     'offers_made',
     'hires',
-    'opportunities_identified',
     'meetings',
     'agreements_signed',
     'job_orders_received',
+    'leads_added',
     'none'
   ) NOT NULL DEFAULT 'none',
   event_type VARCHAR(100) NULL,
@@ -256,10 +256,10 @@ CREATE TABLE IF NOT EXISTS kpi_goals (
     'interviews',
     'offers_made',
     'hires',
-    'opportunities_identified',
     'meetings',
     'agreements_signed',
-    'job_orders_received'
+    'job_orders_received',
+    'leads_added'
   ) NOT NULL,
   period ENUM('daily','weekly','monthly','quarterly','half_year','yearly') NOT NULL,
   goal INT NOT NULL DEFAULT 0,
@@ -269,7 +269,7 @@ CREATE TABLE IF NOT EXISTS kpi_goals (
 
 -- Seed status → KPI mappings (idempotent)
 INSERT IGNORE INTO kpi_status_map (module, status_name, kpi_bucket, event_type) VALUES
--- Recruiting statuses
+-- Recruiting statuses (unchanged)
 ('recruiting','Attempted to Contact','contact_attempts','status_change'),
 ('recruiting','Contacted','contact_attempts',NULL),
 ('recruiting','Screening / Conversation','conversations',NULL),
@@ -279,14 +279,21 @@ INSERT IGNORE INTO kpi_status_map (module, status_name, kpi_bucket, event_type) 
 ('recruiting','Offer Made','offers_made',NULL),
 ('recruiting','Offer Accepted','offers_made',NULL),
 ('recruiting','Hired','hires',NULL),
--- Sales statuses
-('sales','Opportunity Identified','opportunities_identified',NULL),
-('sales','Meeting Scheduled','meetings',NULL),
+
+-- Sales statuses (FINALIZED)
+('sales','New / Lead Added','leads_added',NULL),
+('sales','Contact Attempt - Left Voicemail','contact_attempts','voicemail'),
+('sales','Contact Attempt - Email Sent','contact_attempts','email'),
+('sales','Contact Attempt - LinkedIn Message','contact_attempts','linkedin'),
+('sales','Conversation','conversations',NULL),
+('sales','Agreement Sent','none',NULL),
 ('sales','Agreement Signed','agreements_signed',NULL),
+('sales','Meeting to be Scheduled','none',NULL),
+('sales','Meeting Scheduled','none',NULL),
+('sales','Waiting on Feedback','none',NULL),
 ('sales','Job Order Received','job_orders_received',NULL),
--- Added during debugging to match your actual contact workflow
-('sales','Conversation Started','conversations',NULL),
-('sales','Attempted to Contact','contact_attempts',NULL);
+('sales','No Interest / Lost','none',NULL),
+('sales','Future Contact / On Hold','none',NULL);
 
 -- Seed default KPI goals (agency-level)
 INSERT IGNORE INTO kpi_goals (user_id, metric, period, goal) VALUES
@@ -299,10 +306,12 @@ INSERT IGNORE INTO kpi_goals (user_id, metric, period, goal) VALUES
 (NULL,'interviews','weekly',10),
 (NULL,'offers_made','weekly',2),
 (NULL,'hires','monthly',1),
-(NULL,'opportunities_identified','weekly',10),
-(NULL,'meetings','weekly',8),
+-- removed obsolete sales KPI goals for opportunities_identified and meetings
 (NULL,'agreements_signed','weekly',3),
-(NULL,'job_orders_received','weekly',3);
+(NULL,'job_orders_received','weekly',3),
+-- Leads Added goals (adjust in app as needed)
+(NULL,'leads_added','daily',0),
+(NULL,'leads_added','weekly',0);
 
 -- Idempotent default admin (survives re-runs and partial imports)
 INSERT INTO users (id, full_name, email, password, role, created_at, force_password_change)

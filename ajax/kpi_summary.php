@@ -1,6 +1,9 @@
 <?php
 // /ajax/kpi_summary.php
 // Returns KPI counts & goals for a selected timeframe + always-included "today" block.
+// SALES: count EVERY event (no DISTINCT / no de-dupe). Final Sales KPIs:
+//   leads_added, contact_attempts, conversations, agreements_signed, job_orders_received
+
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -23,7 +26,7 @@ if (!$user_id) {
 
 // ---- Timeframe parsing ----
 $tf = strtolower(trim($_GET['tf'] ?? 'week')); // default: this week
-$tz = new DateTimeZone('America/New_York');
+$tz = new DateTimeZone('America/New_York');    // do not change tz handling
 $now = new DateTime('now', $tz);
 
 function range_for_timeframe(string $tf, DateTime $now, DateTimeZone $tz): array {
@@ -126,11 +129,11 @@ function agency_goal(PDO $pdo, string $metric, string $period): int {
 
 // ---- Utility / constants
 const KPI_RECRUITER = ['contact_attempts','conversations','submittals','interviews','offers_made','hires'];
-const KPI_SALES     = ['contact_attempts','conversations','opportunities_identified','meetings','agreements_signed','job_orders_received'];
 
-function sql_ts_expr(): string {
-    return "COALESCE(changed_at, created_at)";
-}
+// FINAL Sales KPIs (no opportunities_identified, no meetings; include leads_added)
+const KPI_SALES = ['leads_added','contact_attempts','conversations','agreements_signed','job_orders_received'];
+
+function sql_ts_expr(): string { return "COALESCE(changed_at, created_at)"; }
 function sql_distinct_key_recruiting(): string {
     // Prefer legacy pair if available, else fallback to canonical entity
     return "
@@ -141,11 +144,8 @@ function sql_distinct_key_recruiting(): string {
         END
     ";
 }
-function sql_distinct_key_sales(): string {
-    return "CONCAT(entity_type,'-',entity_id)";
-}
 
-// ---- Recruiter counts (entity filter ensures only candidate/job)
+// ---- Recruiter counts (candidate/job): keep DISTINCT semantics for recruiting
 function user_counts_recruiter(PDO $pdo, int $user_id, string $start, string $end): array {
     $out = array_fill_keys(KPI_RECRUITER, 0);
     $ts  = sql_ts_expr();
@@ -191,14 +191,16 @@ function agency_counts_recruiter(PDO $pdo, string $start, string $end): array {
     return $out;
 }
 
-// ---- Sales counts (entity filter ensures only contact)
+/* ===================== SALES COUNTS (NO DE-DUPE) ===================== */
+
 function user_counts_sales(PDO $pdo, int $user_id, string $start, string $end): array {
     $out = array_fill_keys(KPI_SALES, 0);
     $ts  = sql_ts_expr();
-    $key = sql_distinct_key_sales();
     $in  = "'" . implode("','", KPI_SALES) . "'";
+
+    // Count every event (no DISTINCT)
     $sql = "
-        SELECT kpi_bucket, COUNT(DISTINCT {$key}) AS cnt
+        SELECT kpi_bucket, COUNT(*) AS cnt
         FROM status_history
         WHERE changed_by = :uid
           AND {$ts} >= :start AND {$ts} < :end
@@ -218,10 +220,11 @@ function user_counts_sales(PDO $pdo, int $user_id, string $start, string $end): 
 function agency_counts_sales(PDO $pdo, string $start, string $end): array {
     $out = array_fill_keys(KPI_SALES, 0);
     $ts  = sql_ts_expr();
-    $key = sql_distinct_key_sales();
     $in  = "'" . implode("','", KPI_SALES) . "'";
+
+    // Count every event (no DISTINCT)
     $sql = "
-        SELECT kpi_bucket, COUNT(DISTINCT {$key}) AS cnt
+        SELECT kpi_bucket, COUNT(*) AS cnt
         FROM status_history
         WHERE {$ts} >= :start AND {$ts} < :end
           AND entity_type = 'contact'
@@ -243,7 +246,7 @@ $sales_metrics     = KPI_SALES;
 
 // ---- Build main timeframe response
 $period = period_for_tf($tf);
-$out = ['timeframe'=>$tf,'start'=>$start,'end'=>$end,'metrics'=>[]]; // metrics = RECRUITING ONLY
+$out = ['timeframe'=>$tf,'start'=>$start,'end'=>$end,'metrics'=>[]];
 
 // recruiter metrics (kept under original keys so the UI keeps working)
 $you_rec    = user_counts_recruiter($pdo, (int)$user_id, $start, $end);
@@ -266,10 +269,13 @@ $you_sales    = user_counts_sales($pdo, (int)$user_id, $start, $end);
 $agency_sales = agency_counts_sales($pdo, $start, $end);
 $out['sales_metrics'] = [];
 foreach ($sales_metrics as $m) {
+    $goal_you  = user_goal($pdo, (int)$user_id, $m, $period);
+    $count_you = $you_sales[$m] ?? 0;
     $out['sales_metrics'][$m] = [
         'you' => [
-            'count' => $you_sales[$m] ?? 0,
-            'goal'  => user_goal($pdo, (int)$user_id, $m, $period)
+            'count'     => $count_you,
+            'goal'      => $goal_you,
+            'remaining' => max(0, $goal_you - $count_you)
         ],
         'agency' => [
             'count' => $agency_sales[$m] ?? 0,
