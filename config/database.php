@@ -1,9 +1,9 @@
 <?php
 $config = [
     'host' => 'localhost',
-    'dbname' => 'ot-master',
-    'user' => 'ot-master',
-    'pass' => 'otmaster'
+    'dbname' => 'ot_master_3',
+    'user' => 'ot_master_3',
+    'pass' => 'ot_master_3'
 ];
 
 try {
@@ -18,5 +18,8 @@ try {
     }
 } catch (PDOException $e) {
     file_put_contents(__DIR__ . '/pdo_error.log', "PDOException: " . $e->getMessage() . "\n", FILE_APPEND);
-    die("Database connection failed. Check pdo_error.log for details.");
+    // Do not die here; let callers handle failure gracefully
+    $pdo = null;
 }
+
+return $config;

@@ -16,17 +16,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 // ---- Inputs ----
-$to_email     = trim(isset($_POST['to_email']) ? $_POST['to_email'] : '');
-$to_name      = trim(isset($_POST['to_name']) ? $_POST['to_name'] : '');
-$subject      = trim(isset($_POST['subject']) ? $_POST['subject'] : '');
-$body_html    = (string)(isset($_POST['body_html']) ? $_POST['body_html'] : '');
-$related_type = isset($_POST['related_type']) ? $_POST['related_type'] : 'none'; // legacy name; expected 'contact' | 'candidate' | 'none'
-$related_id   = (int)(isset($_POST['related_id']) ? $_POST['related_id'] : 0);
-$return_to    = isset($_POST['return_to']) ? $_POST['return_to'] : '';
-$force_debug  = isset($_POST['__debug']) && $_POST['__debug'] !== '';
+$to_email     = trim($_POST['to_email']     ?? '');
+$to_name      = trim($_POST['to_name']      ?? '');
+$subject      = trim($_POST['subject']      ?? '');
+$body_html    = (string)($_POST['body_html'] ?? '');
+$related_type = $_POST['related_type']      ?? 'none'; // 'contact' | 'candidate' | 'none'
+$related_id   = (int)($_POST['related_id']  ?? 0);
+$return_to    = $_POST['return_to']         ?? '';
+$force_debug  = !empty($_POST['__debug']);
 
 // Basic validation
-if (!$to_email || !$subject || !$body_html) {
+if (!$to_email || !$subject || $body_html === '') {
     echo "<div class='alert alert-danger'>Missing required fields.</div>";
     echo '<p><a href="compose_email.php">Back</a></p>';
     exit;
@@ -47,25 +47,33 @@ if (!empty($_FILES['attachment']['tmp_name']) && is_uploaded_file($_FILES['attac
     }
 }
 
+// Load (non-secret) email config values via central loader
+$cfg = ot_get_email_config();
+
+if (!$pdo instanceof PDO) {
+    echo "<div class='alert alert-danger'>Database connection not available.</div>";
+    echo '<p><a href="compose_email.php">Back</a></p>';
+    exit;
+}
+
 $pdo->beginTransaction();
 try {
+    // Early check: if SMTP not configured, ot_build_mailer will throw with a safe message.
     $mail = ot_build_mailer($pdo);
-    $cfg  = require __DIR__ . '/../config/email.php';
 
-    // ---- SMTP DEBUG CAPTURE ----
+    // ---- SMTP DEBUG CAPTURE (optional) ----
     $smtp_debug_log = '';
     $smtpDebug = isset($cfg['smtp_debug']) ? (int)$cfg['smtp_debug'] : 0;
     if ($force_debug) { $smtpDebug = max($smtpDebug, 2); }
 
     if ($smtpDebug > 0) {
         $mail->SMTPDebug  = $smtpDebug;  // 1..4
-        // Capture debug output instead of echoing
         $mail->Debugoutput = function($str, $level) use (&$smtp_debug_log) {
-            $smtp_debug_log .= "[L" . $level . "] " . $str . "\n";
+            $smtp_debug_log .= "[L{$level}] {$str}\n";
         };
     }
 
-    // Optional TLS workaround if your host has odd certs (toggle in config/email.php)
+    // Optional TLS relaxation only if explicitly configured (compat)
     if (!empty($cfg['allow_self_signed'])) {
         $mail->SMTPOptions = array(
             'ssl' => array(
@@ -78,7 +86,7 @@ try {
 
     // Prepare message
     $mail->clearAllRecipients();
-    $mail->addAddress($to_email, $to_name ? $to_name : $to_email);
+    $mail->addAddress($to_email, $to_name ?: $to_email);
     $mail->Subject = $subject;
     $mail->Body    = $body_html;
     $mail->AltBody = strip_tags($body_html);
@@ -90,47 +98,49 @@ try {
 
     $status = 'sent';
     $error  = null;
+    $messageId = null;
 
     try {
-        if (!$mail->send()) {
+        $ok = $mail->send();
+        if (!$ok) {
             $status = 'failed';
             $error  = $mail->ErrorInfo ? $mail->ErrorInfo : 'Unknown send error';
         }
+        $messageId = $mail->getLastMessageID() ?: null;
     } catch (Exception $e) {
         $status = 'failed';
         $error  = $e->getMessage();
     }
 
-    // If failed and we have SMTP debug details, append them
+    // If failed and we have SMTP debug details, append them (still no secrets)
     if ($status === 'failed' && $smtp_debug_log) {
         $error .= "\n\n--- SMTP Debug ---\n" . $smtp_debug_log;
     }
 
-    // Build log payload
-    // Keep legacy keys that your current ot_log_email() likely expects,
-    // and ALSO include canonical keys so we can later switch to them cleanly.
+    // Build log payload (canonical + legacy shims) — use actual From from PHPMailer
     $logPayload = array(
-        // Canonical fields we want to end up using everywhere:
+        // Canonical fields:
         'direction'       => 'outbound',
-        'related_module'  => $related_type ?: 'none',   // canonical (mirrors related_type)
-        'related_id'      => $related_id ? $related_id : null,
-        'from_name'       => isset($cfg['from_name']) ? $cfg['from_name'] : (isset($cfg['from_email']) ? $cfg['from_email'] : null),
-        'from_email'      => isset($cfg['from_email']) ? $cfg['from_email'] : null,
-        'to_emails'       => $to_email,                 // canonical (even single addr ok)
+        'related_module'  => $related_type ?: 'none',
+        'related_id'      => $related_id ?: null,
+        'from_name'       => $mail->FromName ?? ($cfg['from_name']  ?? null),
+        'from_email'      => $mail->From     ?? ($cfg['from_email'] ?? null),
+        'to_emails'       => $to_email,
         'cc_emails'       => null,
         'bcc_emails'      => null,
         'subject'         => $subject,
         'body_html'       => $body_html,
         'body_text'       => strip_tags($body_html),
         'status'          => $status,
-        'error_message'   => $error,                    // canonical
-        'message_id'      => null,
+        'error_message'   => $error,
+        'message_id'      => $messageId,
         'provider_message_id' => null,
         'headers_json'    => array('note' => 'PHPMailer over SMTP'),
+        'smtp_account'    => ($mail->Host ?? '-') . ':' . (string)($mail->Port ?? ''),
 
-        // Legacy/compat fields your current INSERT has used:
+        // Legacy/compat fields:
         'related_type'    => $related_type ?: 'none',
-        'to_name'         => $to_name ? $to_name : null,
+        'to_name'         => $to_name ?: null,
         'to_email'        => $to_email,
         'error'           => $error
     );
@@ -138,9 +148,8 @@ try {
     // Log it
     ot_log_email($pdo, $logPayload);
 
-    // ---- Auto-create a Note on the target Contact/Candidate (ONLY on successful send) ----
+    // ---- Auto-create a Note on the target Contact/Candidate (only on successful send) ----
     if ($status === 'sent' && $related_id > 0 && in_array($related_type, ['contact','candidate'], true)) {
-        // Plain-text preview of the message body (trim to keep notes readable)
         $previewMax = 1500;
         $plain = trim(strip_tags($body_html));
         if (mb_strlen($plain, 'UTF-8') > $previewMax) {
@@ -155,7 +164,6 @@ try {
         $noteLines[] = $plain;
         $noteContent = implode("\n", $noteLines);
 
-        // Map legacy shim columns for compatibility across views
         $candidate_id = ($related_type === 'candidate') ? $related_id : null;
         $contact_id   = ($related_type === 'contact')   ? $related_id : null;
 
@@ -192,7 +200,23 @@ try {
     echo '<p><a href="compose_email.php">Send another</a></p>';
 
 } catch (Throwable $t) {
-    $pdo->rollBack();
+    if ($pdo->inTransaction()) { $pdo->rollBack(); }
+
+    // Log the unexpected error (without secrets)
+    ot_log_email($pdo, [
+        'direction'       => 'outbound',
+        'related_module'  => $related_type ?: 'none',
+        'related_id'      => $related_id ?: null,
+        'to_emails'       => $to_email ?: null,
+        'subject'         => $subject ?: '',
+        'status'          => 'failed',
+        'error_message'   => 'Unexpected error: ' . $t->getMessage(),
+        // legacy shims
+        'related_type'    => $related_type ?: 'none',
+        'to_email'        => $to_email ?: null,
+        'error'           => 'Unexpected error: ' . $t->getMessage(),
+    ]);
+
     echo "<div class='alert alert-danger'>Unexpected error: " . h($t->getMessage()) . "</div>";
     echo '<p><a href="compose_email.php">Back</a></p>';
 }

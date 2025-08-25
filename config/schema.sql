@@ -142,7 +142,8 @@ CREATE TABLE IF NOT EXISTS notes (
   INDEX idx_candidate_id (candidate_id),
   INDEX idx_job_id (job_id),
   INDEX idx_client_id (client_id),
-  INDEX idx_contact_id (contact_id)
+  INDEX idx_contact_id (contact_id),
+  INDEX idx_module (module_type, module_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Attachments
@@ -165,7 +166,7 @@ CREATE TABLE IF NOT EXISTS email_logs (
   related_type         VARCHAR(50) DEFAULT NULL,           -- legacy/compat
   related_id           INT UNSIGNED DEFAULT NULL,
   from_name            VARCHAR(255) DEFAULT NULL,
-  from_email           VARCHAR(255) NOT NULL,
+  from_email           VARCHAR(255) DEFAULT NULL,          -- made nullable to allow logging pre-config errors
   to_name              VARCHAR(255) DEFAULT NULL,
   to_email             VARCHAR(255) DEFAULT NULL,          -- legacy/compat
   to_emails            TEXT NULL,                          -- nullable for compat

@@ -4,6 +4,28 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 // ✅ Dynamically calculate /public/ base path no matter what folder you're in
 $basePath = explode('/public/', $_SERVER['SCRIPT_NAME'])[0] . '/public/';
+
+// Admin-only SMTP status banner (uses centralized mailer status)
+require_once __DIR__ . '/mailer.php';
+
+// Allow dismissing the banner for this session
+if (isset($_GET['hide_smtp_banner'])) {
+    $_SESSION['hide_smtp_banner'] = true;
+}
+
+$showSmtpBanner = false;
+$smtpReason = '';
+if (
+    isset($_SESSION['user']['role']) &&
+    $_SESSION['user']['role'] === 'admin' &&
+    empty($_SESSION['hide_smtp_banner'])
+) {
+    $status = ot_mailer_status();
+    if (!$status['ok']) {
+        $showSmtpBanner = true;
+        $smtpReason = $status['reason'] ?? 'SMTP not configured.';
+    }
+}
 ?>
 <!-- DEBUG: header.php loaded -->
 
@@ -28,11 +50,15 @@ $basePath = explode('/public/', $_SERVER['SCRIPT_NAME'])[0] . '/public/';
             display: flex;
             align-items: center;
         }
+        .alert-tight {
+            padding-top: .6rem;
+            padding-bottom: .6rem;
+        }
     </style>
 </head>
 <body>
 
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-3">
     <div class="container-fluid">
         <a class="navbar-brand" href="<?= $basePath ?>index.php">OpenTalent</a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar" aria-controls="mainNavbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -75,5 +101,20 @@ $basePath = explode('/public/', $_SERVER['SCRIPT_NAME'])[0] . '/public/';
         </div>
     </div>
 </nav>
+
+<?php if ($showSmtpBanner): ?>
+    <div class="container-fluid px-4">
+        <div class="alert alert-warning alert-tight d-flex align-items-center justify-content-between" role="alert">
+            <div class="me-3">
+                <strong>Outgoing email is not configured.</strong>
+                <span class="ms-2"><?= htmlspecialchars($smtpReason) ?></span>
+            </div>
+            <div class="d-flex gap-2">
+                <a class="btn btn-sm btn-outline-primary" href="<?= $basePath ?>installer_smtp.php">Configure SMTP</a>
+                <a class="btn btn-sm btn-outline-secondary" href="<?= htmlspecialchars($_SERVER['REQUEST_URI'] . (strpos($_SERVER['REQUEST_URI'], '?') !== false ? '&' : '?') . 'hide_smtp_banner=1') ?>">Dismiss</a>
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
 
 <div class="container-fluid px-4">

@@ -10,17 +10,18 @@ if (file_exists($lockFile)) {
 }
 
 // Check system requirements
-$phpOk = version_compare(PHP_VERSION, '7.4.0', '>=');
+$phpOk = version_compare(PHP_VERSION, '7.4.0', '>=') && version_compare(PHP_VERSION, '8.4.0', '<');
 
-$configWritable = is_writable(__DIR__ . '/../config');
+$configWritable  = is_writable(__DIR__ . '/../config');
 $uploadsWritable = is_writable(__DIR__ . '/../uploads');
 
 $requirements = [
-    'PHP Version (>= 7.4 and < 8.3)' => $phpOk,
-    'PDO Extension' => extension_loaded('pdo'),
-    'PDO MySQL Extension' => extension_loaded('pdo_mysql'),
-    'Writable: /config/' => $configWritable,
-    'Writable: /uploads/' => $uploadsWritable,
+    'PHP Version (>= 7.4 and < 8.4)' => $phpOk,
+    'PDO Extension'                  => extension_loaded('pdo'),
+    'PDO MySQL Extension'            => extension_loaded('pdo_mysql'),
+    'OpenSSL Extension'              => extension_loaded('openssl'),
+    'Writable: /config/'             => $configWritable,
+    'Writable: /uploads/'            => $uploadsWritable,
 ];
 
 $allPassed = !in_array(false, $requirements, true);
@@ -33,12 +34,8 @@ $allPassed = !in_array(false, $requirements, true);
     <title>OpenTalent Installer - System Check</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body {
-            background-color: #f8f9fa;
-        }
-        .container {
-            max-width: 700px;
-        }
+        body { background-color: #f8f9fa; }
+        .container { max-width: 700px; }
     </style>
 </head>
 <body>

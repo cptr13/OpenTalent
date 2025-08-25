@@ -50,3 +50,5 @@ public/uploads/
 \!/uploads/.gitkeep
 /uploads/*
 !/uploads/.gitkeep
+/config/database.php
+/config/email.php
