@@ -95,6 +95,20 @@ $total_associations = $pdo->query("SELECT COUNT(*) FROM associations")->fetchCol
                 </div>
             </div>
         </div>
+<!-- KPI Goals Card -->
+<div class="col-md-6">
+  <div class="card shadow-sm h-100">
+    <div class="card-body d-flex flex-column justify-content-between">
+      <div>
+        <h5 class="card-title">KPI Goals (Sales)</h5>
+        <p class="card-text">Set agency defaults and user overrides. Bulk push and copy. View audit history.</p>
+      </div>
+      <div>
+        <a href="admin_kpi_goals.php" class="btn btn-primary">Open KPI Goals</a>
+      </div>
+    </div>
+  </div>
+</div>
 
         <!-- System Settings Card -->
         <div class="col-md-6">

@@ -73,7 +73,6 @@ if (
                 <li class="nav-item"><a class="nav-link" href="<?= $basePath ?>clients.php">Clients</a></li>
                 <li class="nav-item"><a class="nav-link" href="<?= $basePath ?>contacts.php">Contacts</a></li>
                 <li class="nav-item"><a class="nav-link" href="<?= $basePath ?>notes.php">Recent Activities</a></li>
-                <li class="nav-item"><a class="nav-link" href="<?= $basePath ?>change_password.php">Change Password</a></li>
                 <?php if (isset($_SESSION['user']['role']) && $_SESSION['user']['role'] === 'admin'): ?>
                     <li class="nav-item"><a class="nav-link" href="<?= $basePath ?>admin.php">Admin</a></li>
                 <?php endif; ?>

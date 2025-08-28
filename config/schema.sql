@@ -285,9 +285,11 @@ CREATE TABLE IF NOT EXISTS status_history (
   CONSTRAINT fk_hist_user FOREIGN KEY (changed_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Goals table (module-aware; matches live DDL)
 CREATE TABLE IF NOT EXISTS kpi_goals (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NULL,
+  module ENUM('sales','recruiting') NOT NULL DEFAULT 'sales',
   metric ENUM(
     'contact_attempts',
     'conversations',
@@ -302,21 +304,55 @@ CREATE TABLE IF NOT EXISTS kpi_goals (
   ) NOT NULL,
   period ENUM('daily','weekly','monthly','quarterly','half_year','yearly') NOT NULL,
   goal INT NOT NULL DEFAULT 0,
-  UNIQUE KEY uniq_metric_period_user (metric, period, user_id),
+  UNIQUE KEY uniq_module_metric_period_user (module, metric, period, user_id),
+  KEY fk_goals_user (user_id),
   CONSTRAINT fk_goals_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Seed status → KPI mappings (idempotent)
+-- Audit table (matches live DDL)
+CREATE TABLE IF NOT EXISTS kpi_goal_audit (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  goal_id INT(11) DEFAULT NULL,
+  target_user_id INT(11) DEFAULT NULL,
+  metric ENUM(
+    'contact_attempts',
+    'conversations',
+    'submittals',
+    'interviews',
+    'offers_made',
+    'hires',
+    'meetings',
+    'agreements_signed',
+    'job_orders_received',
+    'leads_added'
+  ) NOT NULL,
+  period ENUM('daily','weekly','monthly','quarterly','half_year','yearly') NOT NULL,
+  old_goal INT(11) DEFAULT NULL,
+  new_goal INT(11) DEFAULT NULL,
+  changed_by INT(11) NOT NULL,
+  action ENUM('insert','update','delete') NOT NULL,
+  changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  note VARCHAR(255) DEFAULT NULL,
+  PRIMARY KEY (id),
+  KEY idx_goal_id (goal_id),
+  KEY idx_target_user_metric_period (target_user_id, metric, period),
+  KEY idx_changed_at (changed_at),
+  KEY fk_audit_changed_by (changed_by),
+  CONSTRAINT fk_audit_changed_by FOREIGN KEY (changed_by) REFERENCES users(id) ON UPDATE CASCADE,
+  CONSTRAINT fk_audit_goal FOREIGN KEY (goal_id) REFERENCES kpi_goals(id) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Seed status → KPI mappings (idempotent; reflects final Recruiting mapping)
 INSERT IGNORE INTO kpi_status_map (module, status_name, kpi_bucket, event_type) VALUES
--- Recruiting statuses (unchanged)
+-- Recruiting statuses (FINAL)
 ('recruiting','Attempted to Contact','contact_attempts','status_change'),
-('recruiting','Contacted','contact_attempts',NULL),
+('recruiting','Contacted','none',NULL),
 ('recruiting','Screening / Conversation','conversations',NULL),
 ('recruiting','Submitted to Client','submittals',NULL),
 ('recruiting','Interview Scheduled','interviews','interview_scheduled'),
 ('recruiting','Second Interview Scheduled','interviews','second_interview_scheduled'),
 ('recruiting','Offer Made','offers_made',NULL),
-('recruiting','Offer Accepted','offers_made',NULL),
+('recruiting','Offer Accepted','none',NULL),
 ('recruiting','Hired','hires',NULL),
 
 -- Sales statuses (FINALIZED)
@@ -334,23 +370,23 @@ INSERT IGNORE INTO kpi_status_map (module, status_name, kpi_bucket, event_type) 
 ('sales','No Interest / Lost','none',NULL),
 ('sales','Future Contact / On Hold','none',NULL);
 
--- Seed default KPI goals (agency-level)
-INSERT IGNORE INTO kpi_goals (user_id, metric, period, goal) VALUES
-(NULL,'contact_attempts','daily',50),
-(NULL,'contact_attempts','weekly',250),
-(NULL,'conversations','daily',5),
-(NULL,'conversations','weekly',25),
-(NULL,'submittals','daily',1),
-(NULL,'submittals','weekly',15),
-(NULL,'interviews','weekly',10),
-(NULL,'offers_made','weekly',2),
-(NULL,'hires','monthly',1),
--- removed obsolete sales KPI goals for opportunities_identified and meetings
-(NULL,'agreements_signed','weekly',3),
-(NULL,'job_orders_received','weekly',3),
--- Leads Added goals (adjust in app as needed)
-(NULL,'leads_added','daily',0),
-(NULL,'leads_added','weekly',0);
+-- Seed default KPI goals (agency-level; idempotent)
+-- Recruiting agency defaults
+INSERT IGNORE INTO kpi_goals (user_id, module, metric, period, goal) VALUES
+(NULL,'recruiting','contact_attempts','daily',50),
+(NULL,'recruiting','conversations','daily',15),
+(NULL,'recruiting','submittals','daily',1),
+(NULL,'recruiting','interviews','weekly',2),
+(NULL,'recruiting','offers_made','monthly',2),
+(NULL,'recruiting','hires','monthly',1);
+
+-- Sales agency defaults
+INSERT IGNORE INTO kpi_goals (user_id, module, metric, period, goal) VALUES
+(NULL,'sales','leads_added','daily',2),
+(NULL,'sales','contact_attempts','daily',55),
+(NULL,'sales','conversations','daily',10),
+(NULL,'sales','agreements_signed','weekly',2),
+(NULL,'sales','job_orders_received','weekly',2);
 
 -- Idempotent default admin (survives re-runs and partial imports)
 INSERT INTO users (id, full_name, email, password, role, created_at, force_password_change)
