@@ -1,0 +1,9 @@
+Array
+(
+    [zipFile] => /tmp/phpba5i0gmiv73ne51e8b1
+    [exists] => 1
+    [size] => 33036
+    [mime] => application/zip
+    [is_uploaded] => 1
+    [header] => 504b0304
+)
