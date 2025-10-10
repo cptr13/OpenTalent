@@ -4,8 +4,6 @@ require_once __DIR__ . '/../includes/require_login.php';
 require_once '../includes/header.php';
 require_once '../config/database.php';
 require_once __DIR__ . '/../includes/sortable.php';
-
-// pull in reusable list view helper
 require_once __DIR__ . '/../includes/list_view.php';
 
 // Default to empty list in case of errors
@@ -14,13 +12,14 @@ $clients = [];
 // configuration for filters/labels/columns
 $config = [
     'table' => 'clients',
-    'default_columns' => ['name', 'industry', 'location', 'account_manager', 'created_at'],
+    'default_columns' => ['name', 'industry', 'location', 'account_manager', 'created_at', 'updated_at'],
     'column_labels' => [
         'name' => 'Client Name',
         'industry' => 'Industry',
         'location' => 'Location',
         'account_manager' => 'Account Manager',
         'created_at' => 'Created',
+        'updated_at' => 'Last Update',
     ],
     'filter_types' => [
         'name' => 'text',
@@ -28,24 +27,21 @@ $config = [
         'location' => 'text',
         'account_manager' => 'text',
         'created_at' => 'date_range',
+        'updated_at' => 'date_range',
     ],
 ];
 
-/**
- * Sort controls for header links
- * We only need the keys to match what list_view.php accepts in $_GET['sort'].
- * The SQL fragment returned by ot_get_sort()'s mapping isn't used on this page,
- * because list_view.php handles ORDER BY internally. Mapping each key to itself
- * allows the helper to validate/emit links + arrows safely.
- */
+// Allowed sortable columns
 $ALLOWED_COLUMNS = [
     'name'            => 'name',
     'industry'        => 'industry',
     'location'        => 'location',
     'account_manager' => 'account_manager',
     'created_at'      => 'created_at',
+    'updated_at'      => 'updated_at',
 ];
-// Defaults: name ASC
+
+// Default sort: name ASC
 $S = ot_get_sort($ALLOWED_COLUMNS, 'name', 'asc');
 
 try {
@@ -119,6 +115,11 @@ try {
                                 Created<?= htmlspecialchars(($S['arrow'])('created_at')) ?>
                             </a>
                         </th>
+                        <th>
+                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('updated_at')) ?>">
+                                Last Update<?= htmlspecialchars(($S['arrow'])('updated_at')) ?>
+                            </a>
+                        </th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -131,6 +132,7 @@ try {
                                 <td><?= htmlspecialchars($client['location'] ?? '') ?></td>
                                 <td><?= htmlspecialchars($client['account_manager'] ?? '') ?></td>
                                 <td><?= htmlspecialchars($client['created_at'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($client['updated_at'] ?? '') ?></td>
                                 <td>
                                     <a href="edit_client.php?id=<?= $client['id'] ?>" class="btn btn-warning btn-sm">Edit</a>
                                 </td>
@@ -138,7 +140,7 @@ try {
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="6" class="text-center">No clients found.</td>
+                            <td colspan="7" class="text-center">No clients found.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
@@ -149,25 +151,23 @@ try {
 </div>
 
 <style>
-    /* Existing column-resize styles */
     th { position: relative; }
     th.resizer { cursor: col-resize; user-select: none; }
     th .resizer { position: absolute; right: 0; top: 0; width: 5px; height: 100%; cursor: col-resize; z-index: 1; }
 
-    /* New: flex layout for resizable sidebar */
     .lv-wrap {
         display: flex;
         align-items: stretch;
         gap: 0;
         width: 100%;
-        min-height: 0; /* prevent overflow issues in flex parent */
+        min-height: 0;
     }
     .lv-sidebar {
-        width: 320px;            /* default width */
-        min-width: 220px;        /* prevent collapsing too far */
-        max-width: 600px;        /* optional: cap very wide */
-        overflow: auto;          /* ensures inner scroll rather than growing page */
-        transition: width 0.05s; /* slight smoothness */
+        width: 320px;
+        min-width: 220px;
+        max-width: 600px;
+        overflow: auto;
+        transition: width 0.05s;
     }
     .lv-dragbar {
         width: 6px;
@@ -182,11 +182,10 @@ try {
     }
     .lv-content {
         flex: 1 1 auto;
-        min-width: 0; /* allows horizontal scroll of table when needed */
-        padding-left: 12px; /* small spacing from dragbar */
+        min-width: 0;
+        padding-left: 12px;
     }
 
-    /* Mobile: stack gracefully */
     @media (max-width: 767.98px) {
         .lv-wrap { display: block; }
         .lv-sidebar { width: 100% !important; max-width: none; }
@@ -196,7 +195,6 @@ try {
 </style>
 
 <script>
-    // Existing table column resize
     document.addEventListener('DOMContentLoaded', function () {
         const table = document.getElementById('resizableTable');
         if (table) {
@@ -230,7 +228,6 @@ try {
         }
     });
 
-    // New: sidebar drag-to-resize with persistence
     (function () {
         const sidebar = document.getElementById('lv-sidebar');
         const dragbar = document.getElementById('lv-dragbar');
@@ -240,16 +237,13 @@ try {
         const MIN_W = 220;
         const MAX_W = 600;
 
-        // restore saved width
         try {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 const w = parseInt(saved, 10);
                 if (!isNaN(w)) sidebar.style.width = Math.min(MAX_W, Math.max(MIN_W, w)) + 'px';
             }
-        } catch (e) {
-            // ignore storage errors
-        }
+        } catch (e) {}
 
         let dragging = false;
         let startX = 0;
@@ -278,49 +272,15 @@ try {
             if (!dragging) return;
             dragging = false;
             dragbar.classList.remove('lv-active');
-            // persist width
             try {
                 const currentW = Math.round(sidebar.getBoundingClientRect().width);
                 localStorage.setItem(STORAGE_KEY, String(currentW));
-            } catch (e) {
-                // ignore storage errors
-            }
+            } catch (e) {}
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
         }
 
         dragbar.addEventListener('mousedown', onMouseDown);
-        // touch support (optional)
-        dragbar.addEventListener('touchstart', (e) => {
-            if (!e.touches || !e.touches[0]) return;
-            dragging = true;
-            startX = e.touches[0].clientX;
-            startW = sidebar.getBoundingClientRect().width;
-            dragbar.classList.add('lv-active');
-            document.addEventListener('touchmove', onTouchMove, { passive: false });
-            document.addEventListener('touchend', onTouchEnd);
-        }, { passive: true });
-
-        function onTouchMove(e) {
-            if (!dragging || !e.touches || !e.touches[0]) return;
-            e.preventDefault();
-            const delta = e.touches[0].clientX - startX;
-            let newW = Math.round(startW + delta);
-            if (newW < MIN_W) newW = MIN_W;
-            if (newW > MAX_W) newW = MAX_W;
-            sidebar.style.width = newW + 'px';
-        }
-        function onTouchEnd() {
-            if (!dragging) return;
-            dragging = false;
-            dragbar.classList.remove('lv-active');
-            try {
-                const currentW = Math.round(sidebar.getBoundingClientRect().width);
-                localStorage.setItem(STORAGE_KEY, String(currentW));
-            } catch (e) {}
-            document.removeEventListener('touchmove', onTouchMove);
-            document.removeEventListener('touchend', onTouchEnd);
-        }
     })();
 </script>
 

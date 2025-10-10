@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/require_login.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/date_helpers.php'; // added for business-day logic
 
 $contact_id = $_POST['id'] ?? null;
 $new_stage = $_POST['outreach_stage'] ?? null;
@@ -28,7 +29,7 @@ $touchLabels = [
 
 $stageLabel = $touchLabels[(int)$new_stage] ?? "Touch $new_stage";
 
-// Define delay until next touch (in days)
+// Define delay until next touch (in business days)
 $nextTouchDelays = [
     1 => 2,
     2 => 2,
@@ -44,25 +45,54 @@ $nextTouchDelays = [
     12 => 0 // No next step
 ];
 
+// Holidays to skip (expand as needed)
+$holidays = [
+    '2025-01-01', // New Year’s Day
+    '2025-05-26', // Memorial Day
+    '2025-07-04', // Independence Day
+    '2025-09-01', // Labor Day
+    '2025-11-27', // Thanksgiving Day
+    '2025-12-25', // Christmas Day
+    '2025-11-28', // Day After Thanksgiving (optional business closure)
+];
+
 $delayDays = $nextTouchDelays[(int)$new_stage] ?? null;
 
-// Build SQL to update outreach_stage, last_touch_date, and follow_up_date
 if ($delayDays === 0) {
     // Clear follow-up on breakup
-    $stmt = $pdo->prepare("UPDATE contacts SET outreach_stage = ?, last_touch_date = NOW(), follow_up_date = NULL WHERE id = ?");
+    $stmt = $pdo->prepare("
+        UPDATE contacts
+        SET outreach_stage = ?, last_touch_date = NOW(), follow_up_date = NULL
+        WHERE id = ?
+    ");
     $stmt->execute([$new_stage, $contact_id]);
 } elseif ($delayDays !== null) {
-    // Set next follow-up date
-    $stmt = $pdo->prepare("UPDATE contacts SET outreach_stage = ?, last_touch_date = NOW(), follow_up_date = DATE_ADD(CURDATE(), INTERVAL ? DAY) WHERE id = ?");
-    $stmt->execute([$new_stage, $delayDays, $contact_id]);
+    // Calculate next follow-up date (business days only)
+    $tz = new DateTimeZone('Asia/Manila'); // adjust if needed
+    $now = new DateTimeImmutable('now', $tz);
+    $nextBusinessDate = addBusinessDays($now, $delayDays, $holidays)->format('Y-m-d');
+
+    $stmt = $pdo->prepare("
+        UPDATE contacts
+        SET outreach_stage = ?, last_touch_date = NOW(), follow_up_date = ?
+        WHERE id = ?
+    ");
+    $stmt->execute([$new_stage, $nextBusinessDate, $contact_id]);
 } else {
     // Fallback if delay is undefined
-    $stmt = $pdo->prepare("UPDATE contacts SET outreach_stage = ?, last_touch_date = NOW() WHERE id = ?");
+    $stmt = $pdo->prepare("
+        UPDATE contacts
+        SET outreach_stage = ?, last_touch_date = NOW()
+        WHERE id = ?
+    ");
     $stmt->execute([$new_stage, $contact_id]);
 }
 
 // Add auto-generated note
-$stmt = $pdo->prepare("INSERT INTO notes (module_type, module_id, content, created_at) VALUES (?, ?, ?, NOW())");
+$stmt = $pdo->prepare("
+    INSERT INTO notes (module_type, module_id, content, created_at)
+    VALUES (?, ?, ?, NOW())
+");
 $stmt->execute([
     'contact',
     $contact_id,

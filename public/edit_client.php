@@ -31,10 +31,14 @@ $status_options = [
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>Edit Client</h2>
-    <a href="delete_client.php?id=<?= $client['id'] ?>" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this client?');">Delete</a>
+    <div class="d-flex align-items-center">
+        <!-- NEW: Top-right Update button submits the form below -->
+        <button type="submit" form="editClientForm" class="btn btn-success me-2">Update Client</button>
+        <a href="delete_client.php?id=<?= htmlspecialchars($client['id']) ?>" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this client?');">Delete</a>
+    </div>
 </div>
 
-<form method="POST" action="update_client.php" enctype="multipart/form-data">
+<form id="editClientForm" method="POST" action="update_client.php" enctype="multipart/form-data">
     <input type="hidden" name="id" value="<?= htmlspecialchars($client['id']) ?>">
 
     <div class="mb-3">
@@ -113,7 +117,7 @@ $status_options = [
 
     <div class="d-flex align-items-center mt-4">
         <button type="submit" class="btn btn-success">Update Client</button>
-        <a href="delete_client.php?id=<?= $client['id'] ?>" class="btn btn-danger ms-auto" onclick="return confirm('Are you sure you want to delete this client?');">Delete</a>
+        <a href="delete_client.php?id=<?= htmlspecialchars($client['id']) ?>" class="btn btn-danger ms-auto" onclick="return confirm('Are you sure you want to delete this client?');">Delete</a>
     </div>
 </form>
 

@@ -10,13 +10,13 @@ if (file_exists($lockFile)) {
 }
 
 // Check system requirements
-$phpOk = version_compare(PHP_VERSION, '7.4.0', '>=') && version_compare(PHP_VERSION, '8.4.0', '<');
+$phpOk = version_compare(PHP_VERSION, '7.4.0', '>=');
 
 $configWritable  = is_writable(__DIR__ . '/../config');
 $uploadsWritable = is_writable(__DIR__ . '/../uploads');
 
 $requirements = [
-    'PHP Version (>= 7.4 and < 8.4)' => $phpOk,
+    'PHP Version (>= 7.4)'          => $phpOk,
     'PDO Extension'                  => extension_loaded('pdo'),
     'PDO MySQL Extension'            => extension_loaded('pdo_mysql'),
     'OpenSSL Extension'              => extension_loaded('openssl'),

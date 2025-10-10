@@ -203,7 +203,13 @@ $docCategories = [
                 </div>
                 <div class="card-body">
                     <p><strong>Industry:</strong> <?= h($client['industry']) ?></p>
-                    <p><strong>Website:</strong> <?= h($client['url']) ?></p>
+                    <p><strong>Phone:</strong> <?= h($client['phone'] ?? '') ?></p>
+                    <p>
+                        <strong>Website:</strong>
+                        <?php if (!empty($client['url'])): ?>
+                            <a href="<?= h($client['url']) ?>" target="_blank" rel="noopener"><?= h($client['url']) ?></a>
+                        <?php endif; ?>
+                    </p>
                     <p><strong>Location:</strong> <?= h($client['location']) ?></p>
                 </div>
             </div>

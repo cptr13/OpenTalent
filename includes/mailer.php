@@ -66,7 +66,7 @@ function ot_mailer_status(): array {
  *
  * NOTE: We keep the PDO parameter for backward compatibility even if not used here.
  */
-function ot_build_mailer(PDO $pdo = null): PHPMailer {
+function ot_build_mailer(?PDO $pdo = null): PHPMailer {
     $status = ot_mailer_status();
     if (!$status['ok']) {
         // Clear, non-secret reason; callers can catch and decide what to show.

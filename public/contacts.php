@@ -30,13 +30,14 @@ try {
 $config = [
     'table' => 'contacts',
     // Include contact_status so rows have it available for display/sort
-    'default_columns' => ['first_name', 'last_name', 'email', 'phone', 'contact_status', 'created_at'],
+    'default_columns' => ['first_name', 'last_name', 'email', 'phone', 'contact_status', 'created_at', 'updated_at'],
     'column_labels' => [
         'first_name'      => 'First Name',
         'last_name'       => 'Last Name',
         'email'           => 'Email',
         'phone'           => 'Phone',
         'created_at'      => 'Created',
+        'updated_at'      => 'Last Update',
         'company'         => 'Company',       // Virtual column via JOIN in list_view (sort-enabled)
         'contact_status'  => 'Status',
     ],
@@ -46,6 +47,7 @@ $config = [
         'email'           => 'text',
         'phone'           => 'text',
         'created_at'      => 'date_range',
+        'updated_at'      => 'date_range',
         'contact_status'  => 'dropdown',      // <-- Renders as a select
     ],
     // Provide static dropdown choices so it’s a curated select (no typing)
@@ -66,6 +68,7 @@ $ALLOWED_COLUMNS = [
     'company'         => 'company',        // now enabled (JOIN sort)
     'contact_status'  => 'contact_status', // <-- enable sort on Status
     'created_at'      => 'created_at',
+    'updated_at'      => 'updated_at',
 ];
 
 // Defaults: sort by last_name ASC
@@ -165,6 +168,11 @@ try {
                                 Created<?= htmlspecialchars(($S['arrow'])('created_at')) ?>
                             </a>
                         </th>
+                        <th>
+                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('updated_at')) ?>">
+                                Last Update<?= htmlspecialchars(($S['arrow'])('updated_at')) ?>
+                            </a>
+                        </th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -204,6 +212,7 @@ try {
                                     ?>
                                 </td>
                                 <td><?= htmlspecialchars($contact['created_at'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($contact['updated_at'] ?? '') ?></td>
                                 <td>
                                     <a href="edit_contact.php?id=<?= (int)$contact['id'] ?>" class="btn btn-warning btn-sm">Edit</a>
                                     <a href="delete_contact.php?id=<?= (int)$contact['id'] ?>"
@@ -216,7 +225,7 @@ try {
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="7" class="text-center">No contacts found.</td>
+                            <td colspan="8" class="text-center">No contacts found.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>

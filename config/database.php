@@ -1,9 +1,9 @@
 <?php
 $config = [
     'host' => 'localhost',
-    'dbname' => 'ot_master_3',
-    'user' => 'ot_master_3',
-    'pass' => 'ot_master_3'
+    'dbname' => 'ot-dev',
+    'user' => 'ot-dev',
+    'pass' => 'ot-dev'
 ];
 
 try {
