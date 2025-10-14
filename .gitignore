@@ -44,3 +44,4 @@ node_modules/
 INSTALL_LOCKED
 debug_reset_*.txt
 public/debug*.txt
+_secret_hits_grep.txt
