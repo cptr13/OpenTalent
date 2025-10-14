@@ -1,1 +1,0 @@
-mysql -h 'localhost' -u 'ot-dev' -p'ot-dev' 'ot-dev'
