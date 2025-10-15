@@ -82,7 +82,10 @@ foreach ($assocStatuses as $row) {
  *  ───────────────────────────────────────────────────────────── */
 function h(string $s): string { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
 
-$scope = (isset($_GET['scope']) && $_GET['scope'] === 'agency') ? 'agency' : 'my';
+/** Default scope: AGENCY (unless query explicitly sets my/agency) */
+$scopeParam = $_GET['scope'] ?? null;
+$scope = ($scopeParam === 'my' || $scopeParam === 'agency') ? $scopeParam : 'agency';
+
 $range = $_GET['range'] ?? 'week';
 if (!in_array($range, ['today','week','next'], true)) {
     $range = 'week';
@@ -233,7 +236,7 @@ function isActive(string $current, string $target): string {
             <!-- Scope toggle -->
             <div class="btn-group" role="group" aria-label="Scope">
               <a class="btn btn-sm btn-outline-secondary <?= isActive($scope, 'my'); ?>" href="<?= h(buildToggleUrl('scope','my')); ?>">My</a>
-              <a class="btn btn-sm btn-outline-secondary <?= isActive($scope, 'agency'); ?>" href="<?= h(buildToggleUrl('scope','agency')); ?>">Agency</a>
+              <a class="btn btn-sm btn-outline-secondary <?= isActive($scope, 'agency'); ?>" href<?= '="' . h(buildToggleUrl('scope','agency')) . '"'; ?>>Agency</a>
             </div>
             <!-- Range toggle -->
             <div class="btn-group" role="group" aria-label="Range">

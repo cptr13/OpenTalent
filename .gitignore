@@ -1,47 +1,60 @@
 # --- OpenTalent essentials ---
-
-## Secrets (untracked local config & scans)
+# Secrets
 config/database.php
-config/*.local.php
-config/*.ini
 .env
 .env.*
-.secrets-audit/
-debug_mysql_command.txt
-*.secret.json
-service-account*.json
 
-## Uploads & runtime
-# Root uploads: ignore contents, keep folder via .gitkeep
-uploads/**
-!uploads/.gitkeep
-
-# Temp restore dir: keep folder, ignore contents
-tmp_restore/**
-!tmp_restore/.gitkeep
-
-# Fully ignore public/uploads (should not exist in repo)
-public/uploads/
-
-## Dependencies (optional to commit)
+# Uploads: ignore all files but keep folders via .gitkeep
+!public/uploads/contracts/.gitkeep
+!public/uploads/cover_letters/.gitkeep
+!public/uploads/formatted_resumes/.gitkeep
+!public/uploads/other_attachments/.gitkeep
+# Optional: ignore vendor if you install it on deploy
 vendor/
-node_modules/
-
-## Logs / dumps / noise
+# Common noise
 *.log
+*.sql
+*.sqlite
 *.bak
 *.tmp
 *.swp
 .DS_Store
 .idea/
 .vscode/
-
-# SQL dumps (but keep canonical schema)
-*.sql
-!config/schema.sql
-
-## Debug / runtime artifacts
+# --- Runtime & uploads (root) ---
+uploads/**
+!uploads/.gitkeep
+# Keep tmp/restore dir but not contents
+tmp_restore/**
+!tmp_restore/.gitkeep
+# Debug/runtime artifacts
 INSTALL_LOCKED
 debug_reset_*.txt
 public/debug*.txt
+# Dependencies (optional; keep if you install on deploy)
+node_modules/
+# If you keep a canonical schema file, allow it:
+!config/schema.sql
+# OT essentials
+# Uploads: ignore contents, keep folders with .gitkeep
+# Debug/runtime
+# Dependencies
+# Logs
+# Fully ignore public/uploads (folder should not exist in repo)
+public/uploads/
+
+# Secrets
+/config/email.php
+/config/database.php
+/uploads/*
+\!/uploads/.gitkeep
+/uploads/*
+!/uploads/.gitkeep
+/config/database.php
+/config/email.php
+
+# Local secrets/debug (keep out of git)
 _secret_hits_grep.txt
+secret_files.txt
+secret_hits.txt
+debug_mysql_command.txt

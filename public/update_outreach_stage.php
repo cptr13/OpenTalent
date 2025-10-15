@@ -46,15 +46,12 @@ $nextTouchDelays = [
 ];
 
 // Holidays to skip (expand as needed)
-$holidays = [
-    '2025-01-01', // New Year’s Day
-    '2025-05-26', // Memorial Day
-    '2025-07-04', // Independence Day
-    '2025-09-01', // Labor Day
-    '2025-11-27', // Thanksgiving Day
-    '2025-12-25', // Christmas Day
-    '2025-11-28', // Day After Thanksgiving (optional business closure)
-];
+$year = (int)date('Y');
+$holidays = array_merge(
+    generateCommonUSHolidays($year),
+    generateCommonUSHolidays($year + 1) // covers cross-year cadences
+);
+
 
 $delayDays = $nextTouchDelays[(int)$new_stage] ?? null;
 

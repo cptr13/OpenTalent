@@ -8,20 +8,44 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 // --- Guards & prerequisites ---
-$lockFile        = __DIR__ . '/../INSTALL_LOCKED';
-$dbConfigPath    = __DIR__ . '/../config/database.php';
-$emailConfigPath = __DIR__ . '/../config/email.php';
+$lockFile          = __DIR__ . '/../INSTALL_LOCKED';
+$dbConfigPath      = __DIR__ . '/../config/database.php';
+$emailConfigPath   = __DIR__ . '/../config/email.php';
+$emailExamplePath  = __DIR__ . '/../config/email.example.php';
 
-// If installer is already finalized, bounce to login
-if (file_exists($lockFile)) {
-    header('Location: login.php');
-    exit;
+$installLocked = file_exists($lockFile);
+
+// If installer is finalized:
+//   - Allow access ONLY to logged-in admins (so it can be used as an admin SMTP editor)
+//   - If not logged in, bounce to login
+// If not finalized (installation flow), allow anonymous access exactly as before.
+if ($installLocked) {
+    if (empty($_SESSION['user'])) {
+        header('Location: login.php');
+        exit;
+    }
+    if (empty($_SESSION['user']['role']) || $_SESSION['user']['role'] !== 'admin') {
+        echo "<div style='max-width:760px;margin:2rem auto;font-family:sans-serif'>";
+        echo "<h3>Access denied</h3>";
+        echo "<p>Only administrators can edit SMTP settings after installation is locked.</p>";
+        echo "<p class='small' style='opacity:.8'>Logged in role: " . htmlspecialchars($_SESSION['user']['role'] ?? 'undefined') . "</p>";
+        echo "</div>";
+        exit;
+    }
 }
 
-// Ensure DB config exists before this step
+// Ensure DB config exists before this step.
+// - During install flow (unlocked): redirect to DB step if missing
+// - After install (locked): show blocking error instead of redirecting
 if (!file_exists($dbConfigPath)) {
-    header('Location: installer_db.php');
-    exit;
+    if ($installLocked) {
+        $blockingError = "Database configuration not found at <code>config/database.php</code>. Please restore it or re-run setup.";
+    } else {
+        header('Location: installer_db.php');
+        exit;
+    }
+} else {
+    $blockingError = '';
 }
 
 // Invalidate opcache in case database.php was just rewritten
@@ -29,16 +53,17 @@ if (function_exists('opcache_invalidate')) {
     @opcache_invalidate($dbConfigPath, true);
 }
 
-// Safely load DB config even if the file doesn't return an array
+// --- Helpers ---
+/**
+ * Safely load DB config even if the file doesn't return an array
+ */
 function load_db_config_safely(string $path): array {
-    // Try to capture a return
     ob_start();
     $ret = @include $path;
     ob_end_clean();
     if (is_array($ret)) {
         return $ret;
     }
-    // Fall back to pulling $config defined inside the included file
     $cfg = (static function ($p) {
         $config = null;
         ob_start();
@@ -49,7 +74,22 @@ function load_db_config_safely(string $path): array {
     return $cfg;
 }
 
-$configDb = load_db_config_safely($dbConfigPath);
+/**
+ * If $target is missing and $example exists, copy example → target with restrictive perms.
+ * Returns true if the target exists at the end (created or already present).
+ */
+function ensure_config_from_example(string $target, string $example, int $mode = 0600): bool {
+    if (is_file($target)) return true;
+    if (!is_file($example)) return false;
+    if (!@copy($example, $target)) return false;
+    @chmod($target, $mode);
+    if (function_exists('opcache_invalidate')) {
+        @opcache_invalidate($target, true);
+    }
+    return true;
+}
+
+$configDb = file_exists($dbConfigPath) ? load_db_config_safely($dbConfigPath) : [];
 
 $errors = [];
 $notice = '';
@@ -59,30 +99,31 @@ $test_result = null;
 $test_detail = '';
 
 $debug = isset($_GET['debug']) && $_GET['debug'] == '1';
-$blockingError = '';
 $pdo = null;
 $currentDb = '(unknown)';
 
 // --- DB connection & admin prerequisite (no blind redirects; show blocking errors) ---
 try {
-    if (empty($configDb) || !isset($configDb['host'],$configDb['dbname'],$configDb['user'])) {
-        throw new RuntimeException('Could not load DB credentials from config/database.php');
-    }
+    if (!$blockingError) {
+        if (empty($configDb) || !isset($configDb['host'],$configDb['dbname'],$configDb['user'])) {
+            throw new RuntimeException('Could not load DB credentials from config/database.php');
+        }
 
-    // Use 127.0.0.1 for local to avoid socket/auth oddities
-    $host = ($configDb['host'] === 'localhost') ? '127.0.0.1' : $configDb['host'];
-    $dsn  = "mysql:host={$host};dbname={$configDb['dbname']};charset=utf8mb4";
+        // Use 127.0.0.1 for local to avoid socket/auth oddities
+        $host = ($configDb['host'] === 'localhost') ? '127.0.0.1' : $configDb['host'];
+        $dsn  = "mysql:host={$host};dbname={$configDb['dbname']};charset=utf8mb4";
 
-    $pdo = new PDO($dsn, $configDb['user'], $configDb['pass'] ?? '');
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo = new PDO($dsn, $configDb['user'], $configDb['pass'] ?? '');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    $currentDb = (string)$pdo->query('SELECT DATABASE()')->fetchColumn();
+        $currentDb = (string)$pdo->query('SELECT DATABASE()')->fetchColumn();
 
-    // Check for users table without relying on information_schema permissions
-    $stmt = $pdo->query("SHOW TABLES LIKE 'users'");
-    $hasUsersTable = (bool)$stmt->fetchColumn();
-    if (!$hasUsersTable) {
-        $blockingError = "Required table 'users' not found in database '{$currentDb}'. Run Step 3 (Load Schema) on this database, then return here.";
+        // Check for users table without relying on information_schema permissions
+        $stmt = $pdo->query("SHOW TABLES LIKE 'users'");
+        $hasUsersTable = (bool)$stmt->fetchColumn();
+        if (!$hasUsersTable) {
+            $blockingError = "Required table 'users' not found in database '{$currentDb}'. Run Step 3 (Load Schema) on this database, then return here.";
+        }
     }
 } catch (Throwable $e) {
     $blockingError = "Database connection/check failed: " . $e->getMessage();
@@ -109,6 +150,13 @@ if (!$blockingError) {
     }
 }
 
+// --- Auto-seed config/email.php from example on fresh installs ---
+if (!$blockingError && !file_exists($emailConfigPath) && file_exists($emailExamplePath)) {
+    if (ensure_config_from_example($emailConfigPath, $emailExamplePath)) {
+        $notice = "Created <code>config/email.php</code> from <code>config/email.example.php</code>. Please review and save.";
+    }
+}
+
 // Load existing email config if present
 $existing = [
     'smtp_enabled'   => false,
@@ -124,7 +172,6 @@ $existing = [
     'timeout'        => 25,
 ];
 if (file_exists($emailConfigPath)) {
-    // Avoid notices if the file echoes anything
     ob_start();
     $loaded = @include $emailConfigPath;
     ob_end_clean();
@@ -206,8 +253,10 @@ if (!$blockingError && $action === 'save' && !$errors) {
         if ($written === false) {
             $errors[] = "Failed to write config/email.php. Check permissions.";
         } else {
+            @chmod($emailConfigPath, 0600);
             $saved = true;
-            $notice = "SMTP settings saved.";
+            $notice = $notice ? $notice . ' ' : '';
+            $notice .= "SMTP settings saved.";
             if (function_exists('opcache_invalidate')) {
                 @opcache_invalidate($emailConfigPath, true);
             }
@@ -344,7 +393,7 @@ function smtp_expect($fp, array $expect) {
 function smtp_read($fp) {
     $lines = '';
     while (($line = fgets($fp, 512)) !== false) {
-        $lines += $line;
+        $lines .= $line; // string concatenation
         if (strlen($line) >= 4 && $line[3] === ' ') {
             break;
         }
@@ -369,8 +418,12 @@ function smtp_read($fp) {
 </head>
 <body>
 <div class="container py-5">
-    <h2 class="mb-3">OpenTalent Installation - Step 5: SMTP Settings</h2>
-    <p class="text-muted">Configure the sender and SMTP server used for all emails. You can test delivery before finishing the install.</p>
+    <h2 class="mb-3">
+        <?= $installLocked ? 'SMTP Settings' : 'OpenTalent Installation - Step 5: SMTP Settings' ?>
+    </h2>
+    <p class="text-muted">
+        Configure the sender and SMTP server used for all emails. You can test delivery before finishing<?= $installLocked ? '' : ' the install' ?>.
+    </p>
 
     <?php if ($debug): ?>
         <div class="alert alert-info small">
@@ -379,15 +432,20 @@ function smtp_read($fp) {
                 user=<span class="mono"><?= htmlspecialchars($configDb['user'] ?? '(missing)') ?></span></div>
             <div>Connected DB: <span class="mono"><?= htmlspecialchars($currentDb) ?></span></div>
             <div>email.php path: <span class="mono"><?= htmlspecialchars($emailConfigPath) ?></span> (<?= file_exists($emailConfigPath) ? 'exists' : 'missing' ?>)</div>
+            <div>INSTALL_LOCKED: <span class="mono"><?= $installLocked ? 'yes' : 'no' ?></span></div>
         </div>
     <?php endif; ?>
 
     <?php if ($blockingError): ?>
-        <div class="alert alert-warning"><?= htmlspecialchars($blockingError) ?></div>
+        <div class="alert alert-warning"><?= $blockingError ?></div>
         <div class="d-flex justify-content-between mt-3">
-            <a href="installer_schema.php" class="btn btn-primary">Go to Step 3 (Load Schema) →</a>
-            <a href="installer_admin.php" class="btn btn-outline-secondary">Step 4 (Admin)</a>
-            <a href="installer_db.php" class="btn btn-outline-secondary">DB Settings</a>
+            <?php if (!$installLocked): ?>
+                <a href="installer_schema.php" class="btn btn-primary">Go to Step 3 (Load Schema) →</a>
+                <a href="installer_admin.php" class="btn btn-outline-secondary">Step 4 (Admin)</a>
+                <a href="installer_db.php" class="btn btn-outline-secondary">DB Settings</a>
+            <?php else: ?>
+                <a href="installer_db.php" class="btn btn-outline-secondary">Open DB Settings</a>
+            <?php endif; ?>
         </div>
     <?php else: ?>
 
@@ -400,7 +458,7 @@ function smtp_read($fp) {
                 </ul>
             </div>
         <?php elseif ($notice): ?>
-            <div class="alert alert-success"><?= htmlspecialchars($notice) ?></div>
+            <div class="alert alert-success"><?= $notice ?></div>
         <?php endif; ?>
 
         <?php if ($tested): ?>
@@ -498,13 +556,19 @@ function smtp_read($fp) {
             </div>
 
             <div class="d-flex justify-content-between">
-                <a href="installer_admin.php" class="btn btn-secondary">← Back</a>
+                <?php if ($installLocked): ?>
+                    <a href="admin.php" class="btn btn-secondary">← Back to Admin</a>
+                <?php else: ?>
+                    <a href="installer_admin.php" class="btn btn-secondary">← Back</a>
+                <?php endif; ?>
 
                 <div class="d-flex gap-2">
                     <button type="submit" name="__action" value="save" class="btn btn-primary">Save Settings</button>
                     <button type="submit" name="__action" value="test" class="btn btn-outline-primary">Send Test Email</button>
-                    <a href="installer_finish.php" class="btn btn-success">Next: Finish →</a>
-                    <a href="installer_finish.php?skip_smtp=1" class="btn btn-outline-secondary">Skip for now →</a>
+                    <?php if (!$installLocked): ?>
+                        <a href="installer_finish.php" class="btn btn-success">Next: Finish →</a>
+                        <a href="installer_finish.php?skip_smtp=1" class="btn btn-outline-secondary">Skip for now →</a>
+                    <?php endif; ?>
                 </div>
             </div>
         </form>
