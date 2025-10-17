@@ -185,6 +185,14 @@ $associations = $stmt->fetchAll();
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="mb-0"><?= h(($candidate['first_name'] ?? '') . ' ' . ($candidate['last_name'] ?? '')) ?></h2>
         <div class="d-flex gap-2">
+            <!-- NEW: Scripts button (opens modal; defaults to recruiting/phone) -->
+            <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                onclick="OpenTalentScripts.open({ context: 'recruiting', channel: 'phone', stage: '' })">
+                Scripts
+            </button>
+
             <?php if (!empty($candidate['email'])): ?>
                 <a href="<?= h($email_url) ?>" class="btn btn-sm btn-outline-primary">Email</a>
             <?php else: ?>
@@ -443,4 +451,32 @@ $associations = $stmt->fetchAll();
     </div>
 </div>
 
-<?php require_once __DIR__ . '/../includes/footer.php'; ?>
+<script>
+// Expose merge data for Scripts modal on candidate view
+window.ComposeEmail = window.ComposeEmail || {};
+window.ComposeEmail.userData = {
+  user_name:  <?= json_encode($_SESSION['user']['name']  ?? '') ?>,
+  user_email: <?= json_encode($_SESSION['user']['email'] ?? '') ?>,
+  user_phone: <?= json_encode($_SESSION['user']['phone'] ?? '') ?>
+};
+window.ComposeEmail.recipientData = {
+  first_name:   <?= json_encode($candidate['first_name'] ?? '') ?>,
+  last_name:    <?= json_encode($candidate['last_name']  ?? '') ?>,
+  full_name:    <?= json_encode(trim(($candidate['first_name'] ?? '') . ' ' . ($candidate['last_name'] ?? ''))) ?>,
+  company_name: "", // not candidate-specific; left blank by design
+  job_title:    <?= json_encode($candidate['current_job'] ?? ($candidate['title'] ?? '')) ?>
+};
+window.ComposeEmail.mergeData = Object.assign(
+  {},
+  window.ComposeEmail.userData,
+  window.ComposeEmail.recipientData,
+  { today: <?= json_encode(date('F j, Y')) ?> }
+);
+</script>
+
+<?php
+// Include the Scripts modal so the "Scripts" button works on this page
+include __DIR__ . '/../includes/modal_scripts.php';
+
+require_once __DIR__ . '/../includes/footer.php';
+?>

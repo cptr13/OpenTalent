@@ -56,8 +56,103 @@ if (!$pdo instanceof PDO) {
     exit;
 }
 
+/**
+ * Fetch merge variables for placeholders based on related entity.
+ */
+function ot_build_merge_vars(PDO $pdo, string $related_type, int $related_id, string $to_name): array {
+    $vars = [
+        // defaults
+        'first_name'   => '',
+        'last_name'    => '',
+        'full_name'    => trim($to_name) ?: '',
+        'company'      => '',
+        'company_name' => '',
+        'job_title'    => '',
+        'my_name'      => isset($_SESSION['user']['full_name']) ? (string)$_SESSION['user']['full_name'] : '',
+        'my_title'     => isset($_SESSION['user']['role']) ? (string)$_SESSION['user']['role'] : '',
+        'my_email'     => isset($_SESSION['user']['email']) ? (string)$_SESSION['user']['email'] : '',
+        'region'       => '',
+        // seed/back-compat aliases; will get mapped later
+        'your_name'    => null,
+        'your_agency'  => null,
+    ];
+
+    if ($related_type === 'contact' && $related_id > 0) {
+        $stmt = $pdo->prepare("
+            SELECT c.*, cl.name AS client_name
+            FROM contacts c
+            LEFT JOIN clients cl ON cl.id = c.client_id
+            WHERE c.id = :id
+        ");
+        $stmt->execute([':id' => $related_id]);
+        if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $first = trim((string)($row['first_name'] ?? ''));
+            $last  = trim((string)($row['last_name'] ?? ''));
+            $full  = trim((string)($row['full_name'] ?? ($first . ' ' . $last)));
+            $company = trim((string)($row['client_name'] ?? ''));
+
+            $vars['first_name']   = $first;
+            $vars['last_name']    = $last;
+            $vars['full_name']    = $full ?: $vars['full_name'];
+            $vars['job_title']    = (string)($row['title'] ?? '');
+            $vars['company']      = $company;
+            $vars['company_name'] = $company;
+        }
+    } elseif ($related_type === 'candidate' && $related_id > 0) {
+        $stmt = $pdo->prepare("SELECT * FROM candidates WHERE id = :id");
+        $stmt->execute([':id' => $related_id]);
+        if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $first = trim((string)($row['first_name'] ?? ''));
+            $last  = trim((string)($row['last_name'] ?? ''));
+            $full  = trim($first . ' ' . $last);
+
+            $vars['first_name']   = $first;
+            $vars['last_name']    = $last;
+            $vars['full_name']    = $full ?: $vars['full_name'];
+            $vars['job_title']    = (string)($row['current_job'] ?? '');
+            $company = trim((string)($row['current_employer'] ?? ''));
+            $vars['company']      = $company;
+            $vars['company_name'] = $company;
+        }
+    }
+
+    // Back-compat: map your_* to my_* where sensible
+    $vars['your_name']   = $vars['my_name'];
+    // If you later store an org/agency name in config, map here.
+    $vars['your_agency'] = ''; // intentionally blank until you add org config
+
+    return $vars;
+}
+
+/**
+ * Render {{placeholders}} using merge vars (case-insensitive keys).
+ */
+function ot_render_placeholders(string $text, array $vars): string {
+    if ($text === '') return $text;
+
+    // Normalize keys to lowercase for simple lookup
+    $map = [];
+    foreach ($vars as $k => $v) {
+        $map[strtolower($k)] = (string)($v ?? '');
+    }
+
+    // Replace {{ token }} ignoring surrounding spaces; leave unknown tokens as-is
+    return preg_replace_callback('/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/u', function($m) use ($map) {
+        $key = strtolower($m[1]);
+        return array_key_exists($key, $map) ? $map[$key] : $m[0];
+    }, $text);
+}
+
 $pdo->beginTransaction();
 try {
+    // Build merge vars from the related record (if any)
+    $mergeVars = ot_build_merge_vars($pdo, $related_type, $related_id, $to_name);
+
+    // Render placeholders before sending/logging
+    $rendered_subject  = ot_render_placeholders($subject, $mergeVars);
+    $rendered_body_html = ot_render_placeholders($body_html, $mergeVars);
+    $rendered_alt = strip_tags($rendered_body_html);
+
     // Early check: if SMTP not configured, ot_build_mailer will throw with a safe message.
     $mail = ot_build_mailer($pdo);
 
@@ -87,9 +182,9 @@ try {
     // Prepare message
     $mail->clearAllRecipients();
     $mail->addAddress($to_email, $to_name ?: $to_email);
-    $mail->Subject = $subject;
-    $mail->Body    = $body_html;
-    $mail->AltBody = strip_tags($body_html);
+    $mail->Subject = $rendered_subject;
+    $mail->Body    = $rendered_body_html;
+    $mail->AltBody = $rendered_alt;
 
     // Optional attachment
     if (!empty($_FILES['attachment']['tmp_name']) && is_uploaded_file($_FILES['attachment']['tmp_name'])) {
@@ -128,9 +223,9 @@ try {
         'to_emails'       => $to_email,
         'cc_emails'       => null,
         'bcc_emails'      => null,
-        'subject'         => $subject,
-        'body_html'       => $body_html,
-        'body_text'       => strip_tags($body_html),
+        'subject'         => $rendered_subject,
+        'body_html'       => $rendered_body_html,
+        'body_text'       => $rendered_alt,
         'status'          => $status,
         'error_message'   => $error,
         'message_id'      => $messageId,
@@ -151,14 +246,14 @@ try {
     // ---- Auto-create a Note on the target Contact/Candidate (only on successful send) ----
     if ($status === 'sent' && $related_id > 0 && in_array($related_type, ['contact','candidate'], true)) {
         $previewMax = 1500;
-        $plain = trim(strip_tags($body_html));
+        $plain = trim($rendered_alt);
         if (mb_strlen($plain, 'UTF-8') > $previewMax) {
             $plain = mb_substr($plain, 0, $previewMax, 'UTF-8') . '…';
         }
 
         $noteLines = [];
         $noteLines[] = "Email sent to " . ($to_name ? "{$to_name} <{$to_email}>" : $to_email);
-        $noteLines[] = "Subject: {$subject}";
+        $noteLines[] = "Subject: {$rendered_subject}";
         $noteLines[] = "";
         $noteLines[] = "--- Message Preview ---";
         $noteLines[] = $plain;

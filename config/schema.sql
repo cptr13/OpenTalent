@@ -1,6 +1,20 @@
 -- Disable foreign key checks during table creation
 SET FOREIGN_KEY_CHECKS = 0;
 
+-- -------------------------------------------------
+-- System Settings (branding: company name + logo)
+-- -------------------------------------------------
+CREATE TABLE IF NOT EXISTS system_settings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  company_name VARCHAR(255) DEFAULT NULL,
+  logo_path VARCHAR(255) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Seed a default row if table is empty
+INSERT INTO system_settings (company_name, logo_path)
+SELECT 'OpenTalent', NULL
+WHERE NOT EXISTS (SELECT 1 FROM system_settings);
+
 -- Users
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -8,6 +22,8 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) NOT NULL,
   password VARCHAR(255) NOT NULL,
   role VARCHAR(50) DEFAULT 'user',
+  job_title VARCHAR(255) DEFAULT NULL,
+  phone VARCHAR(50) DEFAULT NULL,
   created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   force_password_change TINYINT(1) DEFAULT 0,
   UNIQUE KEY unique_email (email)
@@ -241,7 +257,6 @@ INSERT IGNORE INTO outreach_templates (id, stage_number, channel, subject, body)
 'Hi {{first_name}},\n\nI haven’t heard back, and that’s completely okay. I know how busy things get.\n\nWould it be helpful if I checked back in a few months, or would you prefer I hold off? Either way, wishing you all the best in your role.\n\n– {{your_name}}');
 
 -- KPI / Quota Tracking
-
 CREATE TABLE IF NOT EXISTS kpi_status_map (
   id INT AUTO_INCREMENT PRIMARY KEY,
   module ENUM('recruiting','sales') NOT NULL,
@@ -387,6 +402,28 @@ INSERT IGNORE INTO kpi_goals (user_id, module, metric, period, goal) VALUES
 (NULL,'sales','conversations','daily',10),
 (NULL,'sales','agreements_signed','weekly',2),
 (NULL,'sales','job_orders_received','weekly',2);
+
+-- -------------------------------------------------------------------
+-- Scripts module (v1) — 2025-10-15
+-- -------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS scripts (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  context ENUM('sales','recruiting','general') NOT NULL DEFAULT 'sales',
+  channel ENUM('phone','email','linkedin','voicemail','sms','other') NOT NULL DEFAULT 'phone',
+  subject VARCHAR(255) DEFAULT NULL,                -- used when channel='email'
+  stage INT DEFAULT NULL,                           -- cadence step (1..12), NULL = any
+  category VARCHAR(100) DEFAULT NULL,               -- Intro, Discovery, Objection, Closing, etc.
+  type ENUM('script','rebuttal','template') DEFAULT 'script',
+  tags VARCHAR(255) DEFAULT NULL,                   -- comma-separated
+  content MEDIUMTEXT NOT NULL,                      -- plain/markdown or HTML
+  is_active TINYINT(1) NOT NULL DEFAULT 1,          -- retired = 0 (hidden by default)
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_ctx_chan_stage (context, channel, stage),
+  FULLTEXT KEY ft_scripts (title, content, tags)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 -- Idempotent default admin (survives re-runs and partial imports)
 INSERT INTO users (id, full_name, email, password, role, created_at, force_password_change)

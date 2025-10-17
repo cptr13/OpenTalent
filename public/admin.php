@@ -53,10 +53,45 @@ if ($smtpStatus['present']) {
         $smtpStatus['encryption'] = $cfg['encryption'] ?? null;
     }
 }
+
+/** Company Branding (system_settings) */
+$branding = [
+    'company_name' => 'OpenTalent',
+    'logo_path'    => null,
+];
+$brandingLoadErr = null;
+
+try {
+    // system_settings: id, company_name, logo_path
+    $stmt = $pdo->query("SHOW TABLES LIKE 'system_settings'");
+    $tableExists = (bool)$stmt->fetchColumn();
+
+    if ($tableExists) {
+        $row = $pdo->query("SELECT company_name, logo_path FROM system_settings LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $branding['company_name'] = $row['company_name'] ?: $branding['company_name'];
+            $branding['logo_path']    = $row['logo_path'] ?: null;
+        }
+    }
+} catch (Throwable $e) {
+    // Don't block the page if table doesn't exist yet
+    $brandingLoadErr = $e->getMessage();
+}
+
+$flash = null;
+if (isset($_GET['saved']) && $_GET['saved'] === '1') {
+    $flash = ['type' => 'success', 'msg' => 'Company settings saved.'];
+} elseif (isset($_GET['saved']) && $_GET['saved'] === '0') {
+    $flash = ['type' => 'danger', 'msg' => 'Unable to save company settings.'];
+}
 ?>
 <div class="container-fluid px-4 mt-4">
     <h2>Admin Dashboard</h2>
     <p class="text-muted">Only visible to admin users.</p>
+
+    <?php if ($flash): ?>
+        <div class="alert alert-<?= htmlspecialchars($flash['type']) ?>"><?= htmlspecialchars($flash['msg']) ?></div>
+    <?php endif; ?>
 
     <!-- System Stats -->
     <div class="row mb-4 g-3 justify-content-start">
@@ -183,6 +218,58 @@ if ($smtpStatus['present']) {
                 </div>
             </div>
         </div>
+
+        <!-- Company Branding Card -->
+        <div class="col-md-12">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <h5 class="card-title mb-0">Company Branding</h5>
+                        <?php if ($brandingLoadErr): ?>
+                            <span class="badge bg-warning text-dark">Table not ready</span>
+                        <?php endif; ?>
+                    </div>
+                    <p class="text-muted mb-3">
+                        Set your company name and upload a logo. The name will replace “OpenTalent” in the header, and the logo will appear in the top bar.
+                    </p>
+
+                    <form action="save_company_settings.php" method="post" enctype="multipart/form-data" class="needs-validation" novalidate>
+                        <div class="row g-3 align-items-start">
+                            <div class="col-md-6">
+                                <label class="form-label">Company Name</label>
+                                <input type="text" name="company_name" class="form-control" value="<?= htmlspecialchars($branding['company_name'] ?? '') ?>" required>
+                                <div class="form-text">Example: Oakway Group</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Logo (PNG/JPG/SVG)</label>
+                                <input type="file" name="logo" accept="image/*" class="form-control">
+                                <div class="form-text">Recommended height ~40px for header display.</div>
+                            </div>
+                        </div>
+
+                        <?php if (!empty($branding['logo_path'])): ?>
+                            <div class="mt-3">
+                                <div class="form-label mb-1">Current Logo</div>
+                                <img src="<?= htmlspecialchars($branding['logo_path']) ?>" alt="Company Logo" style="max-height:60px;">
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if ($brandingLoadErr): ?>
+                            <div class="alert alert-warning mt-3 mb-0">
+                                <strong>Note:</strong> Could not load <code>system_settings</code> (<?= htmlspecialchars($brandingLoadErr) ?>).
+                                You can still submit — the saver can create the table automatically.
+                            </div>
+                        <?php endif; ?>
+
+                        <div class="mt-4">
+                            <button type="submit" class="btn btn-primary">Save Company Settings</button>
+                            <a href="admin.php" class="btn btn-outline-secondary ms-2">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
     </div><!-- /.row -->
 </div>
 

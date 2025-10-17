@@ -31,17 +31,17 @@ $stageLabel = $touchLabels[(int)$new_stage] ?? "Touch $new_stage";
 
 // Define delay until next touch (in business days)
 $nextTouchDelays = [
-    1 => 2,
+    1 => 3,
     2 => 2,
     3 => 3,
     4 => 2,
     5 => 3,
-    6 => 2,
-    7 => 2,
-    8 => 2,
-    9 => 2,
-    10 => 1,
-    11 => 1,
+    6 => 5,
+    7 => 5,
+    8 => 5,
+    9 => 10,
+    10 => 10,
+    11 => 10,
     12 => 0 // No next step
 ];
 

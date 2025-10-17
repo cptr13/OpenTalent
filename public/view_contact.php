@@ -77,6 +77,9 @@ $error = $_GET['error'] ?? null;
 // ----- Contact Status List (entity-aware) -----
 $contactStatusList = getStatusList('contact'); // ['Category' => ['Sub1', 'Sub2', ...]]
 $currentContactStatus = $contact['contact_status'] ?? ''; // safe if column not present
+
+// Grab outreach stage for the Scripts modal default
+$defaultStage = isset($contact['outreach_stage']) && (int)$contact['outreach_stage'] > 0 ? (int)$contact['outreach_stage'] : '';
 ?>
 <div class="container my-4">
     <?php if ($flash_message): ?>
@@ -90,6 +93,14 @@ $currentContactStatus = $contact['contact_status'] ?? ''; // safe if column not 
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="mb-0"><?= h(trim(($contact['first_name'] ?? '') . ' ' . ($contact['last_name'] ?? ''))) ?></h2>
         <div class="d-flex align-items-center gap-2">
+            <!-- NEW: Scripts button (opens modal; defaults to sales/phone and current outreach stage) -->
+            <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                onclick="OpenTalentScripts.open({ context: 'sales', channel: 'phone', stage: '<?= h($defaultStage) ?>' })">
+                Scripts
+            </button>
+
             <?php if (!empty($contact['email'])): ?>
                 <a href="<?= h($email_url) ?>" class="btn btn-sm btn-outline-primary">Email</a>
             <?php else: ?>
@@ -342,4 +353,38 @@ function confirmStageChange(form) {
 }
 </script>
 
-<?php require_once __DIR__ . '/../includes/footer.php'; ?>
+<?php
+// ---- Merge data for Scripts modal (recipient + user) ----
+$recipientData = [
+    'first_name'   => $contact['first_name'] ?? '',
+    'last_name'    => $contact['last_name']  ?? '',
+    'full_name'    => trim(($contact['first_name'] ?? '') . ' ' . ($contact['last_name'] ?? '')),
+    'company_name' => $client['name'] ?? ($contact['company'] ?? ''), // prefer linked client name
+    'job_title'    => $contact['title'] ?? '',
+];
+
+$userData = [
+    'user_name'  => $_SESSION['user']['name']  ?? '',
+    'user_email' => $_SESSION['user']['email'] ?? '',
+    'user_phone' => $_SESSION['user']['phone'] ?? '',
+];
+
+$mergeData = array_merge($recipientData, $userData, [
+    'today' => date('F j, Y'),
+]);
+?>
+
+<script>
+// Expose merge context for the Scripts modal
+window.ComposeEmail = window.ComposeEmail || {};
+window.ComposeEmail.userData = <?= json_encode($userData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+window.ComposeEmail.recipientData = <?= json_encode($recipientData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+window.ComposeEmail.mergeData = <?= json_encode($mergeData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+</script>
+
+<?php
+// Include the Scripts modal so the "Scripts" button works on this page
+include __DIR__ . '/../includes/modal_scripts.php';
+
+require_once __DIR__ . '/../includes/footer.php';
+?>

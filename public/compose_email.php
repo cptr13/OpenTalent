@@ -26,6 +26,42 @@ $host      = $cfg['smtp_host']  ?? '';
 $port      = $cfg['smtp_port']  ?? '';
 $enc       = $cfg['encryption'] ?? '';
 $encLabel  = ($enc === 'starttls' ? 'STARTTLS' : ($enc === 'smtps' ? 'SMTPS' : 'None'));
+
+// 🔹 Fetch related record for merge fields
+$recipientData = [];
+if ($related_type && $related_id > 0) {
+    try {
+        if ($related_type === 'contact') {
+            $stmt = $pdo->prepare("SELECT first_name, last_name, company, title AS job_title FROM contacts WHERE id = ?");
+            $stmt->execute([$related_id]);
+            $recipientData = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        } elseif ($related_type === 'candidate') {
+            $stmt = $pdo->prepare("SELECT first_name, last_name, current_job AS job_title, current_pay, expected_pay FROM candidates WHERE id = ?");
+            $stmt->execute([$related_id]);
+            $recipientData = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        }
+    } catch (Throwable $e) {
+        $recipientData = [];
+    }
+}
+
+// Build user info (sender) — renamed to user_* for placeholders
+$userData = [
+    'user_name'  => $_SESSION['user']['name']  ?? '',
+    'user_email' => $_SESSION['user']['email'] ?? '',
+    'user_phone' => $_SESSION['user']['phone'] ?? '',
+];
+
+// Combine and compute friendly derived fields
+$recipientData['first_name']   = $recipientData['first_name'] ?? '';
+$recipientData['last_name']    = $recipientData['last_name']  ?? '';
+$recipientData['full_name']    = trim(($recipientData['first_name'] ?? '') . ' ' . ($recipientData['last_name'] ?? ''));
+$recipientData['company_name'] = $recipientData['company'] ?? '';
+$recipientData['job_title']    = $recipientData['job_title'] ?? '';
+
+$mergeData = array_merge($recipientData, $userData, [
+    'today' => date('F j, Y'),
+]);
 ?>
 <div class="container my-4">
   <?php if (!$status['ok']): ?>
@@ -57,6 +93,10 @@ $encLabel  = ($enc === 'starttls' ? 'STARTTLS' : ($enc === 'smtps' ? 'SMTPS' : '
   <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
       <span>Compose Email</span>
+      <button type="button" class="btn btn-sm btn-outline-secondary"
+              onclick="OpenTalentScripts.open({ context:'sales', channel:'email' })">
+        Insert from Scripts
+      </button>
     </div>
     <div class="card-body">
       <form action="send_email.php" method="post" enctype="multipart/form-data">
@@ -76,12 +116,12 @@ $encLabel  = ($enc === 'starttls' ? 'STARTTLS' : ($enc === 'smtps' ? 'SMTPS' : '
 
         <div class="mb-3">
           <label class="form-label">Subject</label>
-          <input type="text" name="subject" class="form-control" required>
+          <input type="text" id="emailSubject" name="subject" class="form-control" required>
         </div>
 
         <div class="mb-3">
           <label class="form-label">Message (HTML allowed)</label>
-          <textarea name="body_html" class="form-control" rows="10" required></textarea>
+          <textarea id="emailBody" name="body_html" class="form-control" rows="10" required></textarea>
         </div>
 
         <div class="mb-3">
@@ -110,4 +150,26 @@ $encLabel  = ($enc === 'starttls' ? 'STARTTLS' : ($enc === 'smtps' ? 'SMTPS' : '
     </div>
   </div>
 </div>
+
+<?php include __DIR__ . '/../includes/modal_scripts.php'; ?>
+
+<script>
+// Inject merge data for placeholder replacement
+window.ComposeEmail = window.ComposeEmail || {};
+window.ComposeEmail.userData = <?= json_encode($userData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+window.ComposeEmail.recipientData = <?= json_encode($recipientData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+window.ComposeEmail.mergeData = <?= json_encode($mergeData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+
+// Hook for inserting script content
+(function(){
+  const subjEl = document.getElementById('emailSubject');
+  const bodyEl = document.getElementById('emailBody');
+
+  window.ComposeEmail.insertFromScript = function({ subject = '', body = '' } = {}) {
+    if (subject && subjEl) subjEl.value = subject;
+    if (body && bodyEl)   bodyEl.value = body;
+  };
+})();
+</script>
+
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
