@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS contacts (
   follow_up_date DATE DEFAULT NULL,
   follow_up_notes TEXT,
   outreach_stage TINYINT(4) DEFAULT 1,
+  outreach_cadence ENUM('voicemail','mixed') DEFAULT NULL,
   last_touch_date DATE DEFAULT NULL,
   outreach_status VARCHAR(50) DEFAULT 'Active',
   source VARCHAR(100) DEFAULT NULL,
@@ -424,6 +425,168 @@ CREATE TABLE IF NOT EXISTS scripts (
   FULLTEXT KEY ft_scripts (title, content, tags)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -------------------------------------------------------------------
+-- Dynamic Script Personalization (deterministic) — 2025-10-20
+-- -------------------------------------------------------------------
+
+-- Script Types (e.g., cold_call, voicemail)
+CREATE TABLE IF NOT EXISTS script_types (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  slug VARCHAR(64) NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_script_type_slug (slug)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tone Kits (e.g., friendly, consultative, direct)
+CREATE TABLE IF NOT EXISTS tone_kits (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  slug VARCHAR(64) NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  version INT NOT NULL DEFAULT 1,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_tone_kit_slug (slug)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tone Phrases (slots inside a tone kit)
+CREATE TABLE IF NOT EXISTS tone_phrases (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  tone_kit_id INT NOT NULL,
+  `key` VARCHAR(64) NOT NULL,              -- greeting, value_line, close, permission_check, etc.
+  text TEXT NOT NULL,                      -- can reference {{variables}}
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_tone_key (tone_kit_id, `key`),
+  CONSTRAINT fk_tp_tonekit FOREIGN KEY (tone_kit_id) REFERENCES tone_kits(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Script Templates (versioned, one 'active' per type at a time)
+CREATE TABLE IF NOT EXISTS script_templates (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  script_type_id INT NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  version INT NOT NULL DEFAULT 1,
+  body MEDIUMTEXT NOT NULL,                -- references {{tone.*}} and variables
+  status ENUM('draft','active','archived') NOT NULL DEFAULT 'active',
+  created_by INT NULL,
+  updated_by INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_template_type_status_ver (script_type_id, status, version),
+  CONSTRAINT fk_st_type FOREIGN KEY (script_type_id) REFERENCES script_types(id) ON DELETE CASCADE,
+  CONSTRAINT fk_st_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_st_updated_by FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Stage/Touch-based Tone Rules
+CREATE TABLE IF NOT EXISTS script_rules_stage (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  outreach_stage_slug VARCHAR(64) NOT NULL,   -- e.g., 'cold','open','followup'
+  touch_min INT NOT NULL,
+  touch_max INT NOT NULL,
+  default_tone_slug VARCHAR(64) NOT NULL,     -- references tone_kits.slug (by value)
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_stage_range (outreach_stage_slug, touch_min, touch_max)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Persona-based Tone Rules
+CREATE TABLE IF NOT EXISTS script_rules_persona (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  function_slug VARCHAR(64) NOT NULL,         -- e.g., 'hr','ops','finance','engineering'
+  default_tone_slug VARCHAR(64) NOT NULL,     -- references tone_kits.slug (by value)
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_function_slug (function_slug)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Usage Logging (optional analytics)
+CREATE TABLE IF NOT EXISTS script_activity_log (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NULL,
+  contact_id INT NULL,
+  client_id INT NULL,
+  job_id INT NULL,
+  script_type_slug VARCHAR(64) DEFAULT NULL,
+  tone_used_slug VARCHAR(64) DEFAULT NULL,
+  action ENUM('render','copy','print') NOT NULL DEFAULT 'render',
+  flags_json JSON DEFAULT NULL,                -- {"smalltalk":true,"micro_offer":false}
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_user_time (user_id, created_at),
+  KEY idx_contact_time (contact_id, created_at),
+  KEY idx_client_time (client_id, created_at),
+  KEY idx_job_time (job_id, created_at),
+  CONSTRAINT fk_sal_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_sal_contact FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL,
+  CONSTRAINT fk_sal_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
+  CONSTRAINT fk_sal_job FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---- Seeds (idempotent) for the deterministic scripts engine ----
+
+-- Script Types
+INSERT IGNORE INTO script_types (id, slug, name, is_active) VALUES
+  (1, 'cold_call', 'Cold Call', 1),
+  (2, 'voicemail', 'Voicemail', 1);
+
+-- Tone Kits
+INSERT IGNORE INTO tone_kits (id, slug, name, version, is_active) VALUES
+  (1, 'friendly', 'Friendly', 1, 1),
+  (2, 'consultative', 'Consultative', 1, 1),
+  (3, 'direct', 'Direct', 1, 1);
+
+-- Tone Phrases (Friendly)
+INSERT IGNORE INTO tone_phrases (tone_kit_id, `key`, text) VALUES
+  (1, 'greeting', 'Hey {{contact_first}},'),
+  (1, 'permission_check', 'Got a quick second?'),
+  (1, 'value_line', 'We help teams like yours keep hiring painless.'),
+  (1, 'close', 'Want me to send that over?');
+
+-- Tone Phrases (Consultative)
+INSERT IGNORE INTO tone_phrases (tone_kit_id, `key`, text) VALUES
+  (2, 'greeting', 'Hi {{contact_first}}, appreciate your time.'),
+  (2, 'permission_check', 'Okay to take 30 seconds?'),
+  (2, 'value_line', 'We typically shorten time-to-slate by tightening intake and aligning early.'),
+  (2, 'close', 'Would it help if I sent a one-pager?');
+
+-- Tone Phrases (Direct)
+INSERT IGNORE INTO tone_phrases (tone_kit_id, `key`, text) VALUES
+  (3, 'greeting', '{{contact_first}}, good {{local_part_of_day}}.'),
+  (3, 'permission_check', '30 seconds—yes or no?'),
+  (3, 'value_line', 'Vetted slate in 5 days, ~20% fee, 8-week guarantee.'),
+  (3, 'close', 'Send one-pager or book 15?');
+
+-- Script Templates (one active per type)
+INSERT IGNORE INTO script_templates (script_type_id, name, version, body, status) VALUES
+  -- Cold Call v1
+  (1, 'Cold Call - v1', 1,
+'{{tone.greeting}} {{tone.permission_check}}
+Quick note on your {{top_open_role}}—looks open ~{{days_open_top_role}} days.
+{{tone.value_line}} {{moment_smalltalk}}
+{{micro_offer}}
+{{tone.close}}', 'active'),
+  -- Voicemail v1
+  (2, 'Voicemail - v1', 1,
+'{{tone.greeting}} Quick heads-up on {{top_open_role}}.
+We’re seeing {{pain_point_snippet}}; {{value_prop_snippet}}.
+Call back {{my_phone}} or reply to {{my_email}}. {{tone.close}}', 'active');
+
+-- Stage-based auto-tone defaults (ranges are inclusive)
+INSERT IGNORE INTO script_rules_stage (outreach_stage_slug, touch_min, touch_max, default_tone_slug) VALUES
+  ('cold', 1, 3, 'friendly'),
+  ('open', 4, 6, 'consultative'),
+  ('followup', 7, 12, 'direct');
+
+-- Persona-based fallbacks
+INSERT IGNORE INTO script_rules_persona (function_slug, default_tone_slug) VALUES
+  ('hr', 'friendly'),
+  ('ops', 'direct'),
+  ('finance', 'direct'),
+  ('engineering', 'consultative');
 
 -- Idempotent default admin (survives re-runs and partial imports)
 INSERT INTO users (id, full_name, email, password, role, created_at, force_password_change)
@@ -437,6 +600,66 @@ VALUES (
   1
 )
 ON DUPLICATE KEY UPDATE id = id;
+
+-- -------------------------------------------------------------------
+-- NEW: Unified templates for live + cadence (slug-based) — 2025-10-26
+-- -------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS script_templates_unified (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  template_slug VARCHAR(191) NOT NULL,
+  content_kind ENUM(
+    'live_script',
+    'voicemail',
+    'cadence_email',
+    'cadence_linkedin_request',
+    'cadence_linkedin_dm',
+    'cadence_voicemail',
+    'cadence_sms'
+  ) NOT NULL,
+  touch_number TINYINT NULL,                         -- NULL for live_script
+  tone_default ENUM('auto','friendly','consultative','direct') NULL,
+  locale VARCHAR(8) NOT NULL DEFAULT 'en',
+  status ENUM('draft','active','deprecated') NOT NULL DEFAULT 'draft',
+  version INT NOT NULL DEFAULT 1,
+  subject VARCHAR(255) NULL,                         -- required at runtime for cadence_email
+  body MEDIUMTEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_script_templates_unified_slug_ver (template_slug, version),
+  KEY idx_stu_kind_touch_status (content_kind, touch_number, status),
+  KEY idx_stu_status_slug (status, template_slug)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------------
+-- NEW: Objections & Responses (for live conversations) — 2025-10-26
+-- -------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS outreach_objections (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  objection_slug VARCHAR(191) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  category VARCHAR(100) NULL,
+  locale VARCHAR(8) NOT NULL DEFAULT 'en',
+  status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+  version INT NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_outreach_objections_slug (objection_slug)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS outreach_responses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  objection_slug VARCHAR(191) NOT NULL,              -- FK-like to objections by slug
+  tone ENUM('friendly','consultative','direct') NOT NULL,
+  priority TINYINT NOT NULL,                         -- 1..3
+  body MEDIUMTEXT NOT NULL,
+  status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+  version INT NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_outreach_responses (objection_slug, tone, priority, version),
+  KEY idx_outreach_responses_objection (objection_slug),
+  CONSTRAINT fk_outreach_responses_objection
+    FOREIGN KEY (objection_slug) REFERENCES outreach_objections(objection_slug)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Re-enable foreign key checks
 SET FOREIGN_KEY_CHECKS = 1;

@@ -43,7 +43,7 @@ $currentContactStatus = $contact['contact_status'] ?? '';
             <select name="client_id" id="client_id" class="form-select" required>
                 <option value="">Select a client</option>
                 <?php foreach ($clients as $client): ?>
-                    <option value="<?= htmlspecialchars($client['id']) ?>" <?= ($contact['client_id'] == $client['id']) ? 'selected' : '' ?>>
+                    <option value="<?= htmlspecialchars($client['id']) ?>" <?= (($contact['client_id'] ?? null) == $client['id']) ? 'selected' : '' ?>>
                         <?= htmlspecialchars($client['name']) ?>
                     </option>
                 <?php endforeach; ?>
@@ -53,28 +53,58 @@ $currentContactStatus = $contact['contact_status'] ?? '';
         <div class="row">
             <div class="col-md-6 mb-3">
                 <label for="first_name" class="form-label">First Name</label>
-                <input type="text" name="first_name" id="first_name" class="form-control" value="<?= htmlspecialchars($contact['first_name']) ?>" required>
+                <input type="text" name="first_name" id="first_name" class="form-control" value="<?= htmlspecialchars($contact['first_name'] ?? '') ?>" required>
             </div>
             <div class="col-md-6 mb-3">
                 <label for="last_name" class="form-label">Last Name</label>
-                <input type="text" name="last_name" id="last_name" class="form-control" value="<?= htmlspecialchars($contact['last_name']) ?>" required>
+                <input type="text" name="last_name" id="last_name" class="form-control" value="<?= htmlspecialchars($contact['last_name'] ?? '') ?>" required>
             </div>
         </div>
 
         <div class="mb-3">
             <label for="title" class="form-label">Title / Position</label>
-            <input type="text" name="title" id="title" class="form-control" value="<?= htmlspecialchars($contact['title']) ?>">
+            <input type="text" name="title" id="title" class="form-control" value="<?= htmlspecialchars($contact['title'] ?? '') ?>">
         </div>
 
         <div class="mb-3">
             <label for="email" class="form-label">Email Address</label>
-            <input type="email" name="email" id="email" class="form-control" value="<?= htmlspecialchars($contact['email']) ?>">
+            <input type="email" name="email" id="email" class="form-control" value="<?= htmlspecialchars($contact['email'] ?? '') ?>">
         </div>
 
         <div class="mb-3">
             <label for="phone" class="form-label">Phone Number</label>
-            <input type="text" name="phone" id="phone" class="form-control" value="<?= htmlspecialchars($contact['phone']) ?>">
+            <input type="text" name="phone" id="phone" class="form-control" value="<?= htmlspecialchars($contact['phone'] ?? '') ?>">
         </div>
+
+        <!-- Address (NEW) -->
+        <div class="card mb-3">
+            <div class="card-header">Address</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="address_street" class="form-label">Street</label>
+                    <input type="text" name="address_street" id="address_street" class="form-control" value="<?= htmlspecialchars($contact['address_street'] ?? '') ?>">
+                </div>
+                <div class="row">
+                    <div class="col-md-5 mb-3">
+                        <label for="address_city" class="form-label">City</label>
+                        <input type="text" name="address_city" id="address_city" class="form-control" value="<?= htmlspecialchars($contact['address_city'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label for="address_state" class="form-label">State / Province</label>
+                        <input type="text" name="address_state" id="address_state" class="form-control" value="<?= htmlspecialchars($contact['address_state'] ?? '') ?>">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label for="address_zip" class="form-label">ZIP / Postal Code</label>
+                        <input type="text" name="address_zip" id="address_zip" class="form-control" value="<?= htmlspecialchars($contact['address_zip'] ?? '') ?>">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="address_country" class="form-label">Country</label>
+                    <input type="text" name="address_country" id="address_country" class="form-control" value="<?= htmlspecialchars($contact['address_country'] ?? '') ?>">
+                </div>
+            </div>
+        </div>
+        <!-- /Address -->
 
         <!-- Contact Status (entity-specific) -->
         <div class="mb-3">
@@ -84,7 +114,7 @@ $currentContactStatus = $contact['contact_status'] ?? '';
                 <?php foreach ($contactStatusList as $category => $subs): ?>
                     <optgroup label="<?= htmlspecialchars($category) ?>">
                         <?php foreach ($subs as $sub): ?>
-                            <option value="<?= htmlspecialchars($sub) ?>" <?= ($currentContactStatus === $sub ? 'selected' : '') ?>>
+                            <option value="<?= htmlspecialchars($sub) ?>" <?= (($currentContactStatus === $sub) ? 'selected' : '') ?>>
                                 <?= htmlspecialchars($sub) ?>
                             </option>
                         <?php endforeach; ?>
@@ -117,10 +147,10 @@ $currentContactStatus = $contact['contact_status'] ?? '';
         <div class="mb-3">
             <label for="outreach_status" class="form-label">Outreach Status</label>
             <select name="outreach_status" id="outreach_status" class="form-select">
-                <option value="Active" <?= ($contact['outreach_status'] === 'Active') ? 'selected' : '' ?>>Active</option>
-                <option value="Paused" <?= ($contact['outreach_status'] === 'Paused') ? 'selected' : '' ?>>Paused</option>
-                <option value="Do Not Contact" <?= ($contact['outreach_status'] === 'Do Not Contact') ? 'selected' : '' ?>>Do Not Contact</option>
-                <option value="Completed" <?= ($contact['outreach_status'] === 'Completed') ? 'selected' : '' ?>>Completed</option>
+                <option value="Active" <?= (($contact['outreach_status'] ?? '') === 'Active') ? 'selected' : '' ?>>Active</option>
+                <option value="Paused" <?= (($contact['outreach_status'] ?? '') === 'Paused') ? 'selected' : '' ?>>Paused</option>
+                <option value="Do Not Contact" <?= (($contact['outreach_status'] ?? '') === 'Do Not Contact') ? 'selected' : '' ?>>Do Not Contact</option>
+                <option value="Completed" <?= (($contact['outreach_status'] ?? '') === 'Completed') ? 'selected' : '' ?>>Completed</option>
             </select>
         </div>
 

@@ -30,6 +30,14 @@ $last_name       = trim($_POST['last_name'] ?? '');
 $title           = trim($_POST['title'] ?? '');
 $email           = trim($_POST['email'] ?? '');
 $phone           = trim($_POST['phone'] ?? '');
+
+/* --- NEW: address fields --- */
+$address_street  = trim($_POST['address_street']  ?? '');
+$address_city    = trim($_POST['address_city']    ?? '');
+$address_state   = trim($_POST['address_state']   ?? '');
+$address_zip     = trim($_POST['address_zip']     ?? '');
+$address_country = trim($_POST['address_country'] ?? '');
+
 $follow_up_date  = $_POST['follow_up_date'] ?? null;
 $follow_up_notes = $_POST['follow_up_notes'] ?? '';
 $outreach_stage  = $_POST['outreach_stage'] ?? 1;
@@ -58,40 +66,54 @@ try {
 try {
     $pdo->beginTransaction();
 
-    // Update core fields
+    // Update core fields (+ address fields)
     $sql = "
         UPDATE contacts
-           SET client_id       = :client_id,
-               first_name      = :first_name,
-               last_name       = :last_name,
-               title           = :title,
-               email           = :email,
-               phone           = :phone,
-               contact_status  = :contact_status,
-               follow_up_date  = :follow_up_date,
-               follow_up_notes = :follow_up_notes,
-               outreach_stage  = :outreach_stage,
-               last_touch_date = :last_touch_date,
-               outreach_status = :outreach_status,
-               updated_at      = NOW()
+           SET client_id        = :client_id,
+               first_name       = :first_name,
+               last_name        = :last_name,
+               title            = :title,
+               email            = :email,
+               phone            = :phone,
+
+               address_street   = :address_street,
+               address_city     = :address_city,
+               address_state    = :address_state,
+               address_zip      = :address_zip,
+               address_country  = :address_country,
+
+               contact_status   = :contact_status,
+               follow_up_date   = :follow_up_date,
+               follow_up_notes  = :follow_up_notes,
+               outreach_stage   = :outreach_stage,
+               last_touch_date  = :last_touch_date,
+               outreach_status  = :outreach_status,
+               updated_at       = NOW()
          WHERE id = :id
     ";
 
     $upd = $pdo->prepare($sql);
     $upd->execute([
-        ':client_id'       => $client_id,
-        ':first_name'      => $first_name,
-        ':last_name'       => $last_name,
-        ':title'           => $title,
-        ':email'           => $email,
-        ':phone'           => $phone,
-        ':contact_status'  => $contact_status,
-        ':follow_up_date'  => $follow_up_date ?: null,
-        ':follow_up_notes' => $follow_up_notes,
-        ':outreach_stage'  => $outreach_stage,
-        ':last_touch_date' => $last_touch_date ?: null,
-        ':outreach_status' => $outreach_status,
-        ':id'              => $id,
+        ':client_id'        => $client_id,
+        ':first_name'       => $first_name,
+        ':last_name'        => $last_name,
+        ':title'            => $title,
+        ':email'            => $email,
+        ':phone'            => $phone,
+
+        ':address_street'   => ($address_street  !== '' ? $address_street  : null),
+        ':address_city'     => ($address_city    !== '' ? $address_city    : null),
+        ':address_state'    => ($address_state   !== '' ? $address_state   : null),
+        ':address_zip'      => ($address_zip     !== '' ? $address_zip     : null),
+        ':address_country'  => ($address_country !== '' ? $address_country : null),
+
+        ':contact_status'   => $contact_status,
+        ':follow_up_date'   => $follow_up_date ?: null,
+        ':follow_up_notes'  => $follow_up_notes,
+        ':outreach_stage'   => $outreach_stage,
+        ':last_touch_date'  => $last_touch_date ?: null,
+        ':outreach_status'  => $outreach_status,
+        ':id'               => $id,
     ]);
 
     // Log a note + KPI if status changed

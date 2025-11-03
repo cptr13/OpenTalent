@@ -165,6 +165,28 @@ $stmt = $pdo->prepare("
 ");
 $stmt->execute([$candidate_id]);
 $associations = $stmt->fetchAll();
+
+// Build a Job -> Contacts map + Job -> Client map for the Scripts panel
+$jobContactsMap = []; // job_id => [ [id,name], ... ]
+$jobClientMap   = []; // job_id => client_id
+foreach ($associations as $a) {
+    $jid = (int)$a['job_id'];
+    $jobClientMap[$jid] = !empty($a['client_id']) ? (int)$a['client_id'] : 0;
+    $jobContactsMap[$jid] = [];
+    if (!empty($a['contact_pairs'])) {
+        $pairs = explode(',', $a['contact_pairs']);
+        foreach ($pairs as $pair) {
+            $parts = explode(':', $pair, 2);
+            if (count($parts) === 2) {
+                $cid = (int)$parts[0];
+                $cname = trim($parts[1]);
+                if ($cid && $cname !== '') {
+                    $jobContactsMap[$jid][] = ['id' => $cid, 'name' => $cname];
+                }
+            }
+        }
+    }
+}
 ?>
 
 <!-- Local tweaks -->
@@ -172,6 +194,8 @@ $associations = $stmt->fetchAll();
   .assoc-row { line-height: 1; gap: .5rem; }
   .assoc-sep { color: #6c757d; }
   .assoc-link { white-space: nowrap; }
+  /* small highlight when scrolling to Scripts card */
+  #scripts-card.ring { box-shadow: 0 0 0 .25rem rgba(13,110,253,.25); transition: box-shadow .3s ease; }
 </style>
 
 <div class="container my-4">
@@ -185,11 +209,11 @@ $associations = $stmt->fetchAll();
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="mb-0"><?= h(($candidate['first_name'] ?? '') . ' ' . ($candidate['last_name'] ?? '')) ?></h2>
         <div class="d-flex gap-2">
-            <!-- NEW: Scripts button (opens modal; defaults to recruiting/phone) -->
+            <!-- Scripts button now scrolls to the Scripts panel -->
             <button
                 type="button"
                 class="btn btn-sm btn-outline-secondary"
-                onclick="OpenTalentScripts.open({ context: 'recruiting', channel: 'phone', stage: '' })">
+                onclick="const el=document.getElementById('scripts-card'); if(el){ el.scrollIntoView({behavior:'smooth'}); el.classList.add('ring'); setTimeout(()=>el.classList.remove('ring'),1000);}">
                 Scripts
             </button>
 
@@ -202,6 +226,7 @@ $associations = $stmt->fetchAll();
         </div>
     </div>
 
+    <!-- Candidate Info -->
     <div class="row g-4">
         <div class="col-md-6">
             <div class="card h-100">
@@ -236,6 +261,7 @@ $associations = $stmt->fetchAll();
         </div>
     </div>
 
+    <!-- Resume & Attachments -->
     <div class="row g-4 mt-3">
         <div class="col-md-6">
             <div class="card h-100">
@@ -276,93 +302,64 @@ $associations = $stmt->fetchAll();
         </div>
     </div>
 
-<!-- Attachments -->
-<div class="row g-4 mt-3">
-    <div class="col-12">
-        <div class="card h-100">
-            <div class="card-header">Attachments</div>
-            <div class="card-body">
-                <ul class="list-group">
-                    <?php
-                    // Map: label => [field, folder]
-                    $attachments = [
-                        'Resume'             => ['resume_filename',            'resumes/'],
-                        'Formatted Resume'   => ['formatted_resume_filename', 'resumes/'],
-                        'Cover Letter'       => ['cover_letter_filename',     'resumes/'],
-                        'Other Attachment 1' => ['other_attachment_1',        'resumes/'],
-                        'Other Attachment 2' => ['other_attachment_2',        'resumes/'],
-                        'Contract'           => ['contract_filename',         'resumes/'],
-                    ];
-                    $projectRoot = realpath(__DIR__ . '/..');
-                    $uploadsRoot = $projectRoot . '/uploads';
+    <!-- Attachments -->
+    <div class="row g-4 mt-3">
+        <div class="col-12">
+            <div class="card h-100">
+                <div class="card-header">Attachments</div>
+                <div class="card-body">
+                    <ul class="list-group">
+                        <?php
+                        $attachments = [
+                            'Resume'             => ['resume_filename',            'resumes/'],
+                            'Formatted Resume'   => ['formatted_resume_filename', 'resumes/'],
+                            'Cover Letter'       => ['cover_letter_filename',     'resumes/'],
+                            'Other Attachment 1' => ['other_attachment_1',        'resumes/'],
+                            'Other Attachment 2' => ['other_attachment_2',        'resumes/'],
+                            'Contract'           => ['contract_filename',         'resumes/'],
+                        ];
+                        $projectRoot = realpath(__DIR__ . '/..');
+                        $uploadsRoot = $projectRoot . '/uploads';
 
-                    foreach ($attachments as $label => [$field, $folder]):
-                        $filename = $candidate[$field] ?? null;
-                        if (empty($filename)) continue;
+                        foreach ($attachments as $label => [$field, $folder]):
+                            $filename = $candidate[$field] ?? null;
+                            if (empty($filename)) continue;
 
-                        $rel = $folder . $filename;
-                        $abs = $uploadsRoot . '/' . $rel;
+                            $rel = $folder . $filename;
+                            $abs = $uploadsRoot . '/' . $rel;
 
-                        if (!is_file($abs)) {
-                            // Ghost reference: show clear action
-                            ?>
+                            if (!is_file($abs)) {
+                                ?>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <span><strong><?= h($label) ?>:</strong> <em class="text-muted">missing on disk</em> (<?= h($filename) ?>)</span>
+                                    <a class="btn btn-sm btn-outline-dark" onclick="return confirm('Clear database reference?')"
+                                       href="<?= h(build_clear_only_url((int)$candidate_id, $field, $_SERVER['REQUEST_URI'])) ?>">Clear</a>
+                                </li>
+                                <?php
+                                continue;
+                            }
+
+                            $size = format_bytes((int)filesize($abs));
+                            $ext  = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+                            $icon = file_icon($ext);
+                            $deleteUrl = build_delete_both_url($rel, (int)$candidate_id, $field, $_SERVER['REQUEST_URI']);
+                        ?>
                             <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <span><strong><?= h($label) ?>:</strong> <em class="text-muted">missing on disk</em> (<?= h($filename) ?>)</span>
-                                <a class="btn btn-sm btn-outline-dark" onclick="return confirm('Clear database reference?')"
-                                   href="<?= h(build_clear_only_url((int)$candidate_id, $field, $_SERVER['REQUEST_URI'])) ?>">Clear</a>
+                                <span><strong><?= h($label) ?>:</strong> <?= $icon ?> <?= h($filename) ?> <span class="text-muted small ms-2">(<?= h($size) ?>)</span></span>
+                                <span class="d-flex gap-2">
+                                    <?= render_file_actions_strict($rel, $deleteUrl) ?>
+                                </span>
                             </li>
-                            <?php
-                            continue;
-                        }
-
-                        $size = format_bytes((int)filesize($abs));
-                        $ext  = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-                        $icon = file_icon($ext);
-                        $deleteUrl = build_delete_both_url($rel, (int)$candidate_id, $field, $_SERVER['REQUEST_URI']);
-                    ?>
-                        <li class="list-group-item d-flex justify-content-between align-items-center">
-                            <span><strong><?= h($label) ?>:</strong> <?= $icon ?> <?= h($filename) ?> <span class="text-muted small ms-2">(<?= h($size) ?>)</span></span>
-                            <span class="d-flex gap-2">
-                                <?= render_file_actions_strict($rel, $deleteUrl) ?>
-                            </span>
-                        </li>
-                    <?php endforeach; ?>
-                </ul>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
     <!-- Status & Roles -->
     <?php
-    // Load associations (same as before)
-    $stmt = $pdo->prepare("
-        SELECT 
-            a.id AS association_id,
-            a.status,
-            j.id AS job_id,
-            j.title,
-            cl.id AS client_id,
-            cl.name AS client_name,
-            GROUP_CONCAT(
-                CONCAT(
-                    c.id, ':',
-                    COALESCE(c.full_name, CONCAT(TRIM(c.first_name), ' ', TRIM(c.last_name)))
-                )
-                ORDER BY c.last_name, c.first_name
-                SEPARATOR ','
-            ) AS contact_pairs
-        FROM associations a
-        JOIN jobs j           ON a.job_id = j.id
-        LEFT JOIN clients cl  ON j.client_id = cl.id
-        LEFT JOIN job_contacts jc ON jc.job_id = j.id
-        LEFT JOIN contacts c  ON c.id = jc.contact_id
-        WHERE a.candidate_id = ?
-        GROUP BY a.id, a.status, j.id, j.title, cl.id, cl.name
-        ORDER BY a.created_at DESC, j.title ASC
-    ");
-    $stmt->execute([$candidate_id]);
-    $associations = $stmt->fetchAll();
+    // Reuse $associations from earlier (already loaded)
     ?>
 
     <div class="row g-4 mt-3">
@@ -423,6 +420,85 @@ $associations = $stmt->fetchAll();
         </div>
     </div>
 
+    <!-- NEW: Scripts Panel -->
+    <div class="row g-4 mt-3">
+        <div class="col-12">
+            <div id="scripts-card" class="card">
+                <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                    <span>Scripts</span>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <div class="input-group input-group-sm" style="width:auto;">
+                            <label class="input-group-text" for="scriptType">Type</label>
+                            <select id="scriptType" class="form-select">
+                                <option value="cold_call">Cold Call</option>
+                                <option value="voicemail">Voicemail</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group input-group-sm" style="width:auto;">
+                            <label class="input-group-text" for="jobSelect">Job</label>
+                            <select id="jobSelect" class="form-select">
+                                <option value="">(none)</option>
+                                <?php foreach ($associations as $a): ?>
+                                    <option value="<?= (int)$a['job_id'] ?>">
+                                        <?= h($a['title']) ?><?= !empty($a['client_name']) ? ' — ' . h($a['client_name']) : '' ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+
+                        <div class="input-group input-group-sm" style="width:auto;">
+                            <label class="input-group-text" for="contactSelect">Contact</label>
+                            <select id="contactSelect" class="form-select" disabled>
+                                <option value="">(auto)</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group input-group-sm" style="width:auto;">
+                            <label class="input-group-text" for="toneSelect">Tone</label>
+                            <select id="toneSelect" class="form-select">
+                                <option value="auto" selected>Auto</option>
+                                <option value="friendly">Friendly</option>
+                                <option value="consultative">Consultative</option>
+                                <option value="direct">Direct</option>
+                            </select>
+                        </div>
+
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="toggleSmalltalk" checked>
+                            <label class="form-check-label small" for="toggleSmalltalk">Small-talk</label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="toggleMicroOffer" checked>
+                            <label class="form-check-label small" for="toggleMicroOffer">Micro-offer</label>
+                        </div>
+
+                        <span class="badge text-bg-light" id="toneBadge">Tone: Auto</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="scriptError" class="alert alert-danger d-none mb-3"></div>
+
+                    <div class="mb-2 small text-muted">
+                        Candidate: <?= h($full_name) ?><?php if (!empty($candidate['current_job'])): ?> • Current: <?= h($candidate['current_job']) ?><?php endif; ?>
+                    </div>
+
+                    <textarea id="scriptOutput" class="form-control font-monospace" rows="8" readonly style="white-space: pre-wrap;"></textarea>
+
+                    <div class="d-flex justify-content-between align-items-center mt-2">
+                        <small class="text-muted">
+                            <span id="templateName">Template: —</span> • <span id="toneUsedLabel">Tone used: —</span>
+                        </small>
+                        <div class="d-flex gap-2">
+                            <button id="printBtn" type="button" class="btn btn-sm btn-outline-secondary">Print</button>
+                            <button id="copyBtn" type="button" class="btn btn-sm btn-outline-primary">Copy</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Notes -->
     <div class="row g-4 mt-3">
         <div class="col-12">
@@ -452,7 +528,200 @@ $associations = $stmt->fetchAll();
 </div>
 
 <script>
-// Expose merge data for Scripts modal on candidate view
+(function(){
+  // Build Job -> Contacts + Job -> Client maps for JS
+  window.OTJobContacts = <?= json_encode($jobContactsMap, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
+  window.OTJobClient = <?= json_encode($jobClientMap, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) ?>;
+})();
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const scriptTypeEl   = document.getElementById('scriptType');
+    const jobSelectEl    = document.getElementById('jobSelect');
+    const contactSelectEl= document.getElementById('contactSelect');
+    const toneSelectEl   = document.getElementById('toneSelect');
+    const toggleSmall    = document.getElementById('toggleSmalltalk');
+    const toggleOffer    = document.getElementById('toggleMicroOffer');
+
+    const outputEl       = document.getElementById('scriptOutput');
+    const toneBadge      = document.getElementById('toneBadge');
+    const toneUsedLabel  = document.getElementById('toneUsedLabel');
+    const templateName   = document.getElementById('templateName');
+    const errorBox       = document.getElementById('scriptError');
+    const copyBtn        = document.getElementById('copyBtn');
+    const printBtn       = document.getElementById('printBtn');
+
+    const CANDIDATE_ID = '<?= (int)$candidate['id'] ?>';
+
+    let lastToneUsed = null; // from server response, used for logging
+
+    function populateContactsForJob(jobId) {
+        contactSelectEl.innerHTML = '<option value="">(auto)</option>';
+        const list = window.OTJobContacts[String(jobId)] || [];
+        if (list.length > 0) {
+            contactSelectEl.removeAttribute('disabled');
+            for (const c of list) {
+                const opt = document.createElement('option');
+                opt.value = String(c.id);
+                opt.textContent = c.name;
+                contactSelectEl.appendChild(opt);
+            }
+        } else {
+            contactSelectEl.setAttribute('disabled','disabled');
+        }
+    }
+
+    async function renderScript() {
+        errorBox.classList.add('d-none');
+        errorBox.textContent = '';
+
+        const jobId = jobSelectEl && jobSelectEl.value ? jobSelectEl.value : '';
+        const clientId = jobId ? (window.OTJobClient[String(jobId)] || '') : '';
+        const selectedContact = contactSelectEl && contactSelectEl.value ? contactSelectEl.value : '';
+
+        const params = new URLSearchParams({
+            script_type: scriptTypeEl.value,
+            contact_id: selectedContact,                 // explicit contact if chosen
+            candidate_id: selectedContact ? '' : CANDIDATE_ID, // pass candidate when no contact
+            client_id: clientId ? String(clientId) : '',
+            job_id: jobId ? String(jobId) : '',
+            tone: toneSelectEl.value || 'auto',
+            include_smalltalk: toggleSmall.checked ? '1' : '0',
+            include_micro_offer: toggleOffer.checked ? '1' : '0'
+        });
+
+        try {
+            // IMPORTANT: ../ajax/* because ajax is sibling to public
+            const res = await fetch('../ajax/render_script.php?' + params.toString(), { credentials: 'same-origin' });
+            const text = await res.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (parseErr) {
+                // Show raw response to help diagnose PHP errors/HTML output
+                outputEl.value = '';
+                errorBox.innerHTML = 'Server returned non-JSON (status ' + res.status + ').'
+                  + '<br><br><strong>First 800 chars of response:</strong><br>'
+                  + '<pre style="white-space:pre-wrap;max-height:240px;overflow:auto;margin:0;">'
+                  + text.substring(0, 800).replace(/[<>&]/g, s => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[s]))
+                  + (text.length > 800 ? '…' : '')
+                  + '</pre>';
+                errorBox.classList.remove('d-none');
+                console.warn('render_script raw response:', text);
+                return;
+            }
+
+            if (!data.ok) {
+                throw new Error(data.message || 'Failed to render script');
+            }
+
+            outputEl.value = data.text || '';
+            lastToneUsed = data.tone_used || null;
+
+            const toneMode = (toneSelectEl.value || 'auto');
+            toneBadge.textContent = 'Tone: ' + (toneMode === 'auto' ? 'Auto' : (toneMode.charAt(0).toUpperCase() + toneMode.slice(1) + ' (override)'));
+            toneUsedLabel.textContent = 'Tone used: ' + (data.tone_used || '—');
+            templateName.textContent = 'Template: ' + (data.template_name || '—');
+        } catch (e) {
+            outputEl.value = '';
+            errorBox.textContent = e.message;
+            errorBox.classList.remove('d-none');
+        }
+    }
+
+    async function logActivity(action) {
+        try {
+            const jobId = jobSelectEl && jobSelectEl.value ? jobSelectEl.value : '';
+            const clientId = jobId ? (window.OTJobClient[String(jobId)] || '') : '';
+            const selectedContact = contactSelectEl && contactSelectEl.value ? contactSelectEl.value : '';
+            const flags = {
+                smalltalk: !!toggleSmall.checked,
+                micro_offer: !!toggleOffer.checked
+            };
+            const form = new URLSearchParams({
+                action: action,
+                script_type: scriptTypeEl.value,
+                tone_used: lastToneUsed || (toneSelectEl.value || 'auto'),
+                contact_id: selectedContact,
+                candidate_id: selectedContact ? '' : CANDIDATE_ID, // log who we personalized to
+                client_id: clientId ? String(clientId) : '',
+                job_id: jobId ? String(jobId) : ''
+            });
+            form.append('flags_json', JSON.stringify(flags));
+            // IMPORTANT: ../ajax/* because ajax is sibling to public
+            await fetch('../ajax/log_script_activity.php', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: form.toString()
+            });
+        } catch (e) {
+            console.warn('log failed');
+        }
+    }
+
+    function buildPrintUrl() {
+        const jobId = jobSelectEl && jobSelectEl.value ? jobSelectEl.value : '';
+        const clientId = jobId ? (window.OTJobClient[String(jobId)] || '') : '';
+        const selectedContact = contactSelectEl && contactSelectEl.value ? contactSelectEl.value : '';
+        const params = new URLSearchParams({
+            script_type: scriptTypeEl.value,
+            contact_id: selectedContact,
+            candidate_id: selectedContact ? '' : CANDIDATE_ID, // pass candidate when no contact
+            client_id: clientId ? String(clientId) : '',
+            job_id: jobId ? String(jobId) : '',
+            tone: toneSelectEl.value || 'auto',
+            include_smalltalk: toggleSmall.checked ? '1' : '0',
+            include_micro_offer: toggleOffer.checked ? '1' : '0',
+            print: '1'
+        });
+        return 'print_script.php?' + params.toString();
+    }
+
+    // Event bindings
+    if (scriptTypeEl) scriptTypeEl.addEventListener('change', renderScript);
+    if (jobSelectEl)  jobSelectEl.addEventListener('change', () => { populateContactsForJob(jobSelectEl.value); renderScript(); });
+    if (contactSelectEl) contactSelectEl.addEventListener('change', renderScript);
+    if (toneSelectEl) toneSelectEl.addEventListener('change', renderScript);
+    if (toggleSmall)  toggleSmall.addEventListener('change', renderScript);
+    if (toggleOffer)  toggleOffer.addEventListener('change', renderScript);
+
+    if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+            try {
+                // Modern clipboard with fallback
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(outputEl.value);
+                } else {
+                    outputEl.select();
+                    document.execCommand('copy');
+                }
+                copyBtn.textContent = 'Copied';
+                logActivity('copy');
+                setTimeout(() => copyBtn.textContent = 'Copy', 1200);
+            } catch (e) {
+                console.error(e);
+            }
+        });
+    }
+
+    if (printBtn) {
+        printBtn.addEventListener('click', async () => {
+            logActivity('print');
+            const url = buildPrintUrl();
+            window.open(url, '_blank', 'noopener');
+        });
+    }
+
+    // Initial populate & render
+    populateContactsForJob(jobSelectEl.value);
+    renderScript();
+});
+</script>
+
+<script>
+// Expose merge data (left intact in case other components use it)
 window.ComposeEmail = window.ComposeEmail || {};
 window.ComposeEmail.userData = {
   user_name:  <?= json_encode($_SESSION['user']['name']  ?? '') ?>,
@@ -463,7 +732,7 @@ window.ComposeEmail.recipientData = {
   first_name:   <?= json_encode($candidate['first_name'] ?? '') ?>,
   last_name:    <?= json_encode($candidate['last_name']  ?? '') ?>,
   full_name:    <?= json_encode(trim(($candidate['first_name'] ?? '') . ' ' . ($candidate['last_name'] ?? ''))) ?>,
-  company_name: "", // not candidate-specific; left blank by design
+  company_name: "",
   job_title:    <?= json_encode($candidate['current_job'] ?? ($candidate['title'] ?? '')) ?>
 };
 window.ComposeEmail.mergeData = Object.assign(
@@ -475,8 +744,8 @@ window.ComposeEmail.mergeData = Object.assign(
 </script>
 
 <?php
-// Include the Scripts modal so the "Scripts" button works on this page
-include __DIR__ . '/../includes/modal_scripts.php';
+// Removed modal include; Scripts panel is inline
+// include __DIR__ . '/../includes/modal_scripts.php';
 
 require_once __DIR__ . '/../includes/footer.php';
 ?>
