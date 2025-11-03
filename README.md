@@ -1,145 +1,96 @@
-# 🟦 OpenTalent
+🟦 OpenTalent
 
-**OpenTalent** is a lightweight, self-hosted applicant tracking system (ATS) built for recruiting agencies and independent recruiters. It’s designed to keep your entire workflow in one place — from managing candidates, clients, and job orders to tracking outreach and results.  
+Hi — I’m a career recruiter and open-source enthusiast, and I built OpenTalent mostly for myself. I wanted to make sure I’d always have a working, easy-to-install applicant tracking system (ATS) that I could run anywhere, update anytime, and tweak however I want. That’s really all there is to it.
 
-Unlike bloated enterprise systems, OpenTalent focuses on the essentials: fast search, clear status tracking, bulk resume importing, and built-in email and KPI dashboards. Everything runs on your own server, with no external dependencies or paid APIs.  
+There aren’t many open-source ATS options out there, and most come with restrictive licenses. OpenTalent is different: it’s released under the MIT license, which means you can do absolutely anything you want with it — use it, modify it, resell it, whatever. No limitations, no fine print.
 
-👉 **OpenTalent is 100% open source (MIT License)** — you’re free to use it, modify it, and run it however you like.  
+The code was written almost entirely with ChatGPT (be warned). That either impresses you or scares you, and honestly, both reactions are fair. I’m not a programmer — just a recruiter who needed something functional. The system works well, but I make no promises about security or long-term perfection. Still, I think it’s a solid, dependable tool that can serve for years.
 
----
+✨ What It Is
 
-## ✨ Features
+OpenTalent is a lightweight, self-hosted ATS built with PHP and MySQL.
+It runs on any standard WAMP/LAMP stack — even basic shared hosting.
+No paid APIs, no subscriptions, no external dependencies.
 
-### 🚪 Secure Access
-- Password-protected login for all users.  
-- First-time users are required to set a new password for security.  
+It’s designed for real recruiting work: keeping candidates, clients, jobs, and outreach organized without all the clutter.
 
-### 👤 Candidate Management
-- Add, edit, view, and manage candidate profiles.  
-- Store resumes, formatted resumes, cover letters, and other attachments.  
-- View full resume text inside each profile.  
-- Track candidate status (screening, interviews, offers, etc.).  
+👥 Who It’s For
 
-### 🏢 Client & Contact Management
-- Maintain company/client records with industry, location, and notes.  
-- Add contacts under each client, with titles, emails, and outreach tracking.  
-- Mark a **primary contact** for each client.  
-- Log follow-ups and track outreach stages/statuses.  
+Solo recruiters who just want something simple that works
 
-### 📄 Job Management
-- Add and edit job orders with details like type, location, and description.  
-- Link each job to the correct client.  
-- Track job status (open, filled, on hold, etc.).  
+Small recruiting agencies who prefer control over their data
 
-### 🔗 Associations
-- Link candidates to jobs (applications).  
-- Link contacts to job orders as hiring managers or decision makers.  
-- Track the status of each candidate-job match separately.  
+Internal HR teams who want a private, in-house ATS
 
-### 📝 Notes & Activity
-- Add notes on candidates, clients, contacts, or jobs.  
-- Notes are shared across linked records.  
-- Full activity log with user + timestamp.  
+Developers and tinkerers who like open-source projects
 
-### 📊 KPIs & Dashboard
-- Built-in dashboard to track recruiting and sales activity.  
-- Daily and overall performance views.  
-- Automatically logs key actions (status changes, outreach, etc.).  
+⚙️ What It Does
 
-### 🔍 Smart Search
-- Quick search and autocomplete for candidates, clients, contacts, or jobs.  
-- Used throughout the system to link records quickly.  
+Candidates – Add, edit, and manage profiles. Upload resumes, parse details, import in bulk, and track status by job.
 
-### 📂 Resume Handling
-- Upload and preview resumes right inside the browser.  
-- Parse resumes to extract candidate details (name, email, phone, etc.).  
-- **Bulk resume importing** — upload a ZIP, parse them all, detect duplicates, and review before import.  
+Clients & Contacts – Maintain company records, track key contacts, and log outreach stages.
 
-### 📎 Attachments
-- Store and manage multiple files per candidate.  
-- View or download files directly from each profile.  
+Jobs – Add and edit job orders, link them to clients, and manage open/filled status.
 
-### 📥 Bulk Data Import
-- Import **candidates**, **contacts**, and **clients** via CSV spreadsheets.  
-- Automatic mapping to database fields.  
+Associations – Connect candidates and contacts to jobs; track each relationship separately.
 
-### 📧 Email Integration
-- Built-in SMTP support for sending emails directly from the system.  
-- Outgoing emails are logged as notes under the correct record.  
+Notes & Activity – Add notes across all records; shared and timestamped automatically.
 
-### 🛠️ System Tools
-- Central schema and installer for easy setup.  
-- Backup/restore utilities included.  
-- Clean Bootstrap interface with consistent layout across all modules.  
+Search – Instant autocomplete across candidates, clients, contacts, and jobs.
 
----
+Email (SMTP) – Send directly from the system; logs automatically under each record.
 
-## 🛠️ Roadmap
+Dashboard & KPIs – Simple at-a-glance view of your recruiting activity.
 
-### 🔒 Security & Stability
-- Hardening review for shared hosting (uploads, HTTPS).  
-- Logging system for all adds/updates/deletes.  
-- Smooth factory reset + installer polish.  
+Attachments & Resume Text – Store, view, and preview uploaded files inline.
 
-### 👤 Candidate Features
-- Status tracking per job association.  
-- Improved resume parser (more fields, higher accuracy).  
-- Resume preview inline for PDFs/DOCs.  
-- Organize attachments into type-based folders.  
+Admin Tools – Installer, backups, and a clean Bootstrap-based interface.
 
-### 🏢 Client & Contact Features
-- Autocomplete linking for all contact ↔ client flows.  
-- More detailed outreach tracking (stages, attempts, email/call logging).  
-- Show all linked jobs on contact pages.  
+💼 What It’s Like in Practice
 
-### 📄 Job Features
-- Job order parser (extract details from pasted job descriptions).  
-- Dropdown for job type (full-time, part-time, contract).  
-- Consistent layouts across job pages.  
+OpenTalent is a straightforward, low-end ATS — it’s not fancy, but it’s solid.
+It handles candidates, resumes, clients, jobs, and all the interactions that go with them.
+Resume parsing is intentionally simple, and there are no external APIs (yet) to hook into other systems.
 
-### 🔗 Associations & Notes
-- Centralize all assignment flows into `associate.php`.  
-- Smarter notes (automatically show all linked records).  
-- Edit/delete notes consistently.  
+What’s there works, and works well.
 
-### 📊 KPIs & Dashboard
-- Ensure all status changes flow into KPIs.  
-- Add missing KPIs (e.g., “agreement signed” for clients).  
-- Daily/weekly target setting.  
+A couple of features I built specifically for my own workflow make it a bit different:
 
-### 📥 Import/Export
-- Unify single and bulk resume parsing logic.  
-- Cleanup bulk CSV imports for clients/contacts.  
-- Add demo data + factory reset for new installs.  
+A KPI dashboard that tracks your daily recruiting targets and progress in real time.
 
-### 📧 Email Integration
-- Inbound email logging (IMAP).  
-- Outgoing emails update status + notes.  
-- Workflow automation (e.g., follow-ups after X days).  
+Live activity tracking that shows how you’re performing against those goals as you work.
 
-### 🎨 Usability & Look/Feel
-- Theme customization (multiple CSS themes).  
-- Consistent Bootstrap layout across all view screens.  
-- Scrollable cards for long text sections.  
+A dynamic scripting engine that generates personalized call scripts with the most effective tone for each contact — executive, consultative, or friendly — based on the information already in the ATS.
 
-### 💾 Backup & Restore
-- Full backup/restore in admin.  
-- Factory reset option.  
-- Scheduled backups (later).  
+A 12-touch sales cadence built into the contact module for consistent business development follow-up.
 
-### 🚀 Future Ideas
-- Workflow automation engine.  
-- AI-powered resume & job parsing.  
-- Demo mode for showcasing.  
-- Record “owner” fields polished across all modules.  
+Documentation for these features will come later, but they’re already live and functional.
 
----
+🛠️ Installing It
 
-## ⚖️ License
+Setup instructions will be published soon.
+For now, if you’ve ever installed WordPress, you can probably handle this.
+You’ll need a standard PHP + MySQL environment — WAMP, LAMP, or shared hosting will all work fine.
 
-This project is open source under the **MIT License**.  
-You can use it, modify it, and redistribute it freely — even for commercial use.  
+⚡ Reality Check
 
-See the [LICENSE](./LICENSE) file for details.  
+OpenTalent isn’t hardened software, and security is minimal.
+But it’s not just an experiment — it’s the system I personally use every day in my recruiting work.
+It’s a solid, functional ATS that anyone can run and depend on.
 
----
+If you like to tinker or customize your own tools, you’ll feel right at home.
+
+🔁 Development Philosophy
+
+OpenTalent isn’t “finished,” and it probably never will be.
+I plan to keep improving it, adding features as I need them and fixing things as I find them.
+It’s practical, evolving, and meant to stay that way.
+
+Contributions, pull requests, and feedback are welcome — or you can just use it privately and make it your own.
+If you have a question, suggestion, or idea, feel free to message me through GitHub.
+
+⚖️ License
+
+OpenTalent is open source under the MIT License.
+Do anything you want with it — use it, modify it, redistribute it, even commercially.
+No limitations. No dependencies. No nonsense.
