@@ -511,6 +511,7 @@ CREATE TABLE IF NOT EXISTS script_activity_log (
   contact_id INT NULL,
   client_id INT NULL,
   job_id INT NULL,
+  candidate_id INT NULL,
   script_type_slug VARCHAR(64) DEFAULT NULL,
   tone_used_slug VARCHAR(64) DEFAULT NULL,
   action ENUM('render','copy','print') NOT NULL DEFAULT 'render',
@@ -520,10 +521,12 @@ CREATE TABLE IF NOT EXISTS script_activity_log (
   KEY idx_contact_time (contact_id, created_at),
   KEY idx_client_time (client_id, created_at),
   KEY idx_job_time (job_id, created_at),
-  CONSTRAINT fk_sal_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
-  CONSTRAINT fk_sal_contact FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL,
-  CONSTRAINT fk_sal_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
-  CONSTRAINT fk_sal_job FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL
+  KEY idx_candidate_time (candidate_id, created_at),
+  CONSTRAINT fk_sal_user      FOREIGN KEY (user_id)      REFERENCES users(id)      ON DELETE SET NULL,
+  CONSTRAINT fk_sal_contact   FOREIGN KEY (contact_id)   REFERENCES contacts(id)   ON DELETE SET NULL,
+  CONSTRAINT fk_sal_client    FOREIGN KEY (client_id)    REFERENCES clients(id)    ON DELETE SET NULL,
+  CONSTRAINT fk_sal_job       FOREIGN KEY (job_id)       REFERENCES jobs(id)       ON DELETE SET NULL,
+  CONSTRAINT fk_sal_candidate FOREIGN KEY (candidate_id) REFERENCES candidates(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---- Seeds (idempotent) for the deterministic scripts engine ----
@@ -628,6 +631,35 @@ CREATE TABLE IF NOT EXISTS script_templates_unified (
   UNIQUE KEY uq_script_templates_unified_slug_ver (template_slug, version),
   KEY idx_stu_kind_touch_status (content_kind, touch_number, status),
   KEY idx_stu_status_slug (status, template_slug)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------------
+-- NEW: Snapshot backup of unified templates (matches structure)
+-- -------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS script_templates_unified_bak_20251102 (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  template_slug VARCHAR(191) NOT NULL,
+  content_kind ENUM(
+    'live_script',
+    'voicemail',
+    'cadence_email',
+    'cadence_linkedin_request',
+    'cadence_linkedin_dm',
+    'cadence_voicemail',
+    'cadence_sms'
+  ) NOT NULL,
+  touch_number TINYINT NULL,
+  tone_default ENUM('auto','friendly','consultative','direct') NULL,
+  locale VARCHAR(8) NOT NULL DEFAULT 'en',
+  status ENUM('draft','active','deprecated') NOT NULL DEFAULT 'draft',
+  version INT NOT NULL DEFAULT 1,
+  subject VARCHAR(255) NULL,
+  body MEDIUMTEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_script_templates_unified_bak_slug_ver (template_slug, version),
+  KEY idx_stu_bak_kind_touch_status (content_kind, touch_number, status),
+  KEY idx_stu_bak_status_slug (status, template_slug)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------------------------------------------------

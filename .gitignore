@@ -52,9 +52,3 @@ public/uploads/
 !/uploads/.gitkeep
 /config/database.php
 /config/email.php
-
-# Local secrets/debug (keep out of git)
-_secret_hits_grep.txt
-secret_files.txt
-secret_hits.txt
-debug_mysql_command.txt

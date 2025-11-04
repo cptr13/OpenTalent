@@ -94,7 +94,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new RuntimeException("Selected SQL file is empty or unreadable: $sqlFile");
         }
 
+        // Run the primary SQL (schema/demo/backup)
         $pdo->exec($sql);
+
+        // --- OPTIONAL: run seed scripts if present (idempotent) ---
+        // These will populate dynamic scripts, tone kits, unified templates, etc.
+        // Failures here should not block installation.
+        $seedFiles = [
+            __DIR__ . '/../config/seed_scripts.sql',   // dynamic scripts seeds (idempotent)
+            __DIR__ . '/../config/seed_extra.sql',     // future seeds (optional)
+        ];
+
+        foreach ($seedFiles as $seedFile) {
+            if (file_exists($seedFile)) {
+                $seedSql = file_get_contents($seedFile);
+                if ($seedSql && trim($seedSql) !== '') {
+                    try {
+                        $pdo->exec($seedSql);
+                        if ($debug) {
+                            error_log("Installer: successfully ran seed file: {$seedFile}");
+                        }
+                    } catch (Throwable $se) {
+                        // Don’t block install; log and continue
+                        error_log("Installer: seed script failed for {$seedFile}: " . $se->getMessage());
+                    }
+                }
+            }
+        }
 
         // Mark success in session and jump to next step
         $_SESSION['installer_schema_ok'] = true;
@@ -155,6 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div>DB Name: <span class="mono"><?= htmlspecialchars($config['dbname'] ?? '(missing)') ?></span></div>
             <div>DB User: <span class="mono"><?= htmlspecialchars($config['user'] ?? '(missing)') ?></span></div>
             <div>Schema OK flag: <span class="mono"><?= !empty($_SESSION['installer_schema_ok']) ? 'true' : 'false' ?></span></div>
+            <div>Seeds: looks for <span class="mono">config/seed_scripts.sql</span> (and <span class="mono">config/seed_extra.sql</span>)</div>
         </div>
     <?php endif; ?>
 
@@ -174,7 +201,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <option value="restore" <?= (($_POST['mode'] ?? '') === 'restore') ? 'selected' : '' ?>>Restore from Backup</option>
                 </select>
             </div>
-
+            <div class="alert alert-secondary small">
+                Installer will also run <span class="mono">config/seed_scripts.sql</span> automatically if present.
+            </div>
             <div class="d-flex justify-content-between">
                 <a href="installer_db.php" class="btn btn-secondary">← Back</a>
                 <button type="submit" class="btn btn-primary">Run Setup →</button>
