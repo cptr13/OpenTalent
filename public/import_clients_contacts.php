@@ -73,6 +73,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['excel_file'])) {
           'city/state'              => 'company_location',
           'industry'                => 'company_industry',
           'account manager'         => 'account_manager',
+
+          // NEW: allow various about-like headers to map to company_about
+          'about'                   => 'company_about',
+          'about company'           => 'company_about',
+          'company about'           => 'company_about',
+          'company snapshot'        => 'company_about',
         ];
 
         // Build canonical header array (convert underscores to spaces first)
@@ -91,15 +97,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['excel_file'])) {
         // ---- Prepare statements ---------------------------------------------------
         $findClient = $pdo->prepare("SELECT id FROM clients WHERE name = ?");
         $insertClient = $pdo->prepare("
-            INSERT INTO clients (name, phone, location, industry, url, created_at)
-            VALUES (:name, :phone, :location, :industry, :url, NOW())
+            INSERT INTO clients (name, phone, location, industry, url, about, created_at)
+            VALUES (:name, :phone, :location, :industry, :url, :about, NOW())
         ");
         $updateClient = $pdo->prepare("
             UPDATE clients
-               SET phone = :phone,
+               SET phone    = :phone,
                    location = :location,
                    industry = :industry,
-                   url = :url,
+                   url      = :url,
+                   about    = :about,
                    updated_at = NOW()
              WHERE id = :id
         ");
@@ -143,6 +150,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['excel_file'])) {
             $company_industry = trim((string)($row['company_industry']   ?? ''));
             $account_manager  = trim((string)($row['account_manager']    ?? ''));
 
+            // NEW: company about text (supports both mapped alias and raw 'about')
+            $company_about    = trim((string)($row['company_about'] ?? ($row['about'] ?? '')));
+
             // If only a single contact_name was provided, split into first/last
             if (empty($first_name) && empty($last_name) && !empty($row['contact_name'])) {
                 $cn = trim((string)$row['contact_name']);
@@ -174,17 +184,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['excel_file'])) {
                         ':location' => $company_location ?: null,
                         ':industry' => $company_industry ?: null,
                         ':url'      => $company_url ?: null,
+                        ':about'    => $company_about ?: null,
                     ]);
                     $client_id = (int)$pdo->lastInsertId();
                     $success[] = "Client created: $company";
                 } else {
                     $client_id = (int)$client['id'];
-                    // Light update with provided non-empty values
+                    // Light update with provided non-empty values (still passing null for blanks)
                     $updateClient->execute([
                         ':phone'    => $company_phone    ?: null,
                         ':location' => $company_location ?: null,
                         ':industry' => $company_industry ?: null,
                         ':url'      => $company_url      ?: null,
+                        ':about'    => $company_about    ?: null,
                         ':id'       => $client_id,
                     ]);
                     $success[] = "Client exists: $company";
