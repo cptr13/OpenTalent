@@ -433,14 +433,15 @@ CREATE TABLE IF NOT EXISTS scripts (
 
 -- Script Types (e.g., cold_call, voicemail)
 CREATE TABLE IF NOT EXISTS script_types (
-  id INT AUTO_INCREMENT PRIMARY KEY,
+  id INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
   slug VARCHAR(64) NOT NULL,
   name VARCHAR(128) NOT NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_script_type_slug (slug)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY ux_script_types_slug (slug)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Tone Kits (e.g., friendly, consultative, direct)
 CREATE TABLE IF NOT EXISTS tone_kits (
@@ -468,21 +469,22 @@ CREATE TABLE IF NOT EXISTS tone_phrases (
 
 -- Script Templates (versioned, one 'active' per type at a time)
 CREATE TABLE IF NOT EXISTS script_templates (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  script_type_id INT NOT NULL,
+  id INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  script_type_id INT(10) UNSIGNED NOT NULL,
   name VARCHAR(128) NOT NULL,
-  version INT NOT NULL DEFAULT 1,
+  version INT(10) UNSIGNED NOT NULL DEFAULT 1,
   body MEDIUMTEXT NOT NULL,                -- references {{tone.*}} and variables
-  status ENUM('draft','active','archived') NOT NULL DEFAULT 'active',
-  created_by INT NULL,
-  updated_by INT NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  KEY idx_template_type_status_ver (script_type_id, status, version),
-  CONSTRAINT fk_st_type FOREIGN KEY (script_type_id) REFERENCES script_types(id) ON DELETE CASCADE,
-  CONSTRAINT fk_st_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-  CONSTRAINT fk_st_updated_by FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  status VARCHAR(32) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY ux_template_name_version_per_type (script_type_id, name, version),
+  KEY ix_script_templates_type (script_type_id),
+  CONSTRAINT fk_script_templates_script_types
+    FOREIGN KEY (script_type_id)
+    REFERENCES script_types(id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Stage/Touch-based Tone Rules
 CREATE TABLE IF NOT EXISTS script_rules_stage (
