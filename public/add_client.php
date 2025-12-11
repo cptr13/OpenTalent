@@ -8,6 +8,7 @@ require_once __DIR__ . '/../config/database.php';
     <h2 class="mb-4">Add New Client</h2>
 
     <form method="POST" action="save_client.php" enctype="multipart/form-data">
+
         <div class="mb-3">
             <label for="name" class="form-label">Client Name</label>
             <input type="text" name="name" id="name" class="form-control" required>
@@ -36,6 +37,29 @@ require_once __DIR__ . '/../config/database.php';
         <div class="mb-3">
             <label for="website" class="form-label">Website</label>
             <input type="text" name="website" id="website" class="form-control">
+        </div>
+
+        <!-- NEW: LinkedIn URL -->
+        <div class="mb-3">
+            <label for="linkedin" class="form-label">LinkedIn URL</label>
+            <input type="text" name="linkedin" id="linkedin" class="form-control">
+        </div>
+
+        <!-- NEW: Company Size -->
+        <div class="mb-3">
+            <label for="company_size" class="form-label">Company Size</label>
+            <select name="company_size" id="company_size" class="form-select">
+                <option value="">-- Select Company Size --</option>
+                <option value="Myself Only">Myself Only</option>
+                <option value="2–10 employees">2–10 employees</option>
+                <option value="11–50 employees">11–50 employees</option>
+                <option value="51–200 employees">51–200 employees</option>
+                <option value="201–500 employees">201–500 employees</option>
+                <option value="501–1,000 employees">501–1,000 employees</option>
+                <option value="1,001–5,000 employees">1,001–5,000 employees</option>
+                <option value="5,001–10,000 employees">5,001–10,000 employees</option>
+                <option value="10,001+ employees">10,001+ employees</option>
+            </select>
         </div>
 
         <div class="mb-3">

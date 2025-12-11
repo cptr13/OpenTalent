@@ -29,6 +29,8 @@ $phone           = $val('phone');
 $account_manager = $val('account_manager');
 $status          = $val('status');
 $about           = $val('about');
+$company_size    = $val('company_size');    // LinkedIn-style company size
+$linkedin        = $val('linkedin');        // NEW: LinkedIn URL
 
 // Optional: light normalization for website (keep as-is if you prefer)
 /*
@@ -47,6 +49,8 @@ try {
                 account_manager = :account_manager,
                 status = :status,
                 about = :about,
+                company_size = :company_size,
+                linkedin = :linkedin,
                 updated_at = NOW()
             WHERE id = :id";
 
@@ -60,6 +64,8 @@ try {
         ':account_manager'  => $account_manager,
         ':status'           => $status,
         ':about'            => $about,
+        ':company_size'     => $company_size,
+        ':linkedin'         => $linkedin,
         ':id'               => $id
     ]);
 

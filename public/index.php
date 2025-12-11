@@ -204,6 +204,26 @@ function isActive(string $current, string $target): string {
   .dash-draggable { cursor: move; }
   .dash-drop-target { outline: 2px dashed var(--bs-secondary); outline-offset: 4px; }
   .dash-handle { font-weight: 700; font-size: 1.1rem; line-height: 1; cursor: move; }
+
+  /* Minimize / maximize for dashboard cards */
+  .dash-card {
+      position: relative;
+  }
+  .dash-card.card-collapsed > :not(.card-header) {
+      display: none !important;
+  }
+  .dash-toggle {
+      border: none;
+      background: transparent;
+      padding: 0;
+      font-size: 1rem;
+      line-height: 1;
+      cursor: pointer;
+      color: #666;
+  }
+  .dash-toggle:hover {
+      color: #000;
+  }
 </style>
 
 <div class="container mt-4">
@@ -214,10 +234,13 @@ function isActive(string $current, string $target): string {
 
     <!-- KPI / Quota Tracker -->
     <section class="dash-section" data-key="kpi">
-      <div class="card shadow mb-4">
+      <div class="card shadow mb-4 dash-card" data-card-id="kpi">
         <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
           <h5 class="mb-0">KPI / Quota Tracker</h5>
-          <span class="dash-handle dash-draggable" draggable="true" title="Drag to reorder">↕</span>
+          <div class="d-flex align-items-center gap-2">
+            <button type="button" class="dash-toggle" aria-label="Toggle card">−</button>
+            <span class="dash-handle dash-draggable" draggable="true" title="Drag to reorder">↕</span>
+          </div>
         </div>
         <div class="card-body">
           <?php require_once __DIR__ . '/../includes/kpi_card.php'; ?>
@@ -227,7 +250,7 @@ function isActive(string $current, string $target): string {
 
     <!-- Upcoming Outreach (contacts-based, includes Overdue) -->
     <section class="dash-section" data-key="outreach">
-      <div class="card shadow mb-4">
+      <div class="card shadow mb-4 dash-card" data-card-id="outreach">
         <div class="card-header bg-light d-flex flex-wrap justify-content-between align-items-center gap-2">
           <div class="d-flex align-items-center gap-2">
             <h5 class="mb-0">Upcoming Outreach</h5>
@@ -244,7 +267,8 @@ function isActive(string $current, string $target): string {
               <a class="btn btn-sm btn-outline-secondary <?= isActive($range, 'week'); ?>" href="<?= h(buildToggleUrl('range','week')); ?>">This Week</a>
               <a class="btn btn-sm btn-outline-secondary <?= isActive($range, 'next'); ?>" href="<?= h(buildToggleUrl('range','next')); ?>">Next Week</a>
             </div>
-            <span class="dash-handle dash-draggable ms-2" draggable="true" title="Drag to reorder">↕</span>
+            <button type="button" class="dash-toggle ms-2" aria-label="Toggle card">−</button>
+            <span class="dash-handle dash-draggable" draggable="true" title="Drag to reorder">↕</span>
           </div>
         </div>
 
@@ -321,10 +345,13 @@ function isActive(string $current, string $target): string {
 
     <!-- At a Glance (tiles inside a card) -->
     <section class="dash-section" data-key="stats">
-      <div class="card shadow mb-4">
+      <div class="card shadow mb-4 dash-card" data-card-id="stats">
         <div class="card-header bg-light d-flex justify-content-between align-items-center">
           <h5 class="mb-0">At a Glance</h5>
-          <span class="dash-handle dash-draggable" draggable="true" title="Drag to reorder">↕</span>
+          <div class="d-flex align-items-center gap-2">
+            <button type="button" class="dash-toggle" aria-label="Toggle card">−</button>
+            <span class="dash-handle dash-draggable" draggable="true" title="Drag to reorder">↕</span>
+          </div>
         </div>
         <div class="card-body">
           <div class="row g-4">
@@ -378,10 +405,13 @@ function isActive(string $current, string $target): string {
 
     <!-- Pipeline Activity -->
     <section class="dash-section" data-key="pipeline">
-      <div class="card shadow mb-5">
+      <div class="card shadow mb-5 dash-card" data-card-id="pipeline">
         <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
           <h5 class="mb-0">Pipeline Activity</h5>
-          <span class="dash-handle dash-draggable" draggable="true" title="Drag to reorder">↕</span>
+          <div class="d-flex align-items-center gap-2">
+            <button type="button" class="dash-toggle" aria-label="Toggle card">−</button>
+            <span class="dash-handle dash-draggable" draggable="true" title="Drag to reorder">↕</span>
+          </div>
         </div>
         <div class="card-body">
           <?php if (count($jobsWithAssociations) === 0): ?>
@@ -496,6 +526,48 @@ function isActive(string $current, string $target): string {
     const order = Array.from(wrap.querySelectorAll('.dash-section'))
       .map(el => el.getAttribute('data-key'));
     localStorage.setItem('dashOrder', JSON.stringify(order));
+  });
+})();
+
+/** Minimize / maximize for dashboard cards, persisted per card */
+(function(){
+  const KEY = 'dashCollapse';
+  let state = {};
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) state = JSON.parse(raw) || {};
+  } catch (e) {
+    state = {};
+  }
+
+  const cards = document.querySelectorAll('.dash-card');
+  if (!cards.length) return;
+
+  cards.forEach(card => {
+    const id = card.getAttribute('data-card-id');
+    if (!id) return;
+    const header = card.querySelector('.card-header');
+    if (!header) return;
+
+    const btn = header.querySelector('.dash-toggle');
+    if (!btn) return;
+
+    // Apply saved state
+    if (state[id]) {
+      card.classList.add('card-collapsed');
+    }
+    btn.textContent = card.classList.contains('card-collapsed') ? '+' : '−';
+
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      card.classList.toggle('card-collapsed');
+      const collapsed = card.classList.contains('card-collapsed');
+      btn.textContent = collapsed ? '+' : '−';
+      state[id] = collapsed;
+      try {
+        localStorage.setItem(KEY, JSON.stringify(state));
+      } catch (e) {}
+    });
   });
 })();
 </script>

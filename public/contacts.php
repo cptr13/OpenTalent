@@ -1,16 +1,16 @@
 <?php
 require_once __DIR__ . '/../includes/require_login.php';
-require_once '../includes/header.php';
-require_once '../config/database.php';
+require_once __DIR__ . '/../includes/header.php';
+require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/list_view.php';
 require_once __DIR__ . '/../includes/sortable.php';
 require_once __DIR__ . '/../config/status.php'; // <-- Needed for getStatusList('contact')
 
 // Default to empty list in case of errors
-$contacts = [];
+$contacts    = [];
 $clientNames = [];
 
-// Build contact status dropdown options from config/status.contact.php
+// Build contact status dropdown options from config/status_contact.php
 $contactStatusOptions = [];
 try {
     $statusList = getStatusList('contact'); // returns ['Category' => ['Sub1','Sub2',...]]
@@ -29,8 +29,17 @@ try {
 // Config for Contacts list/filters
 $config = [
     'table' => 'contacts',
-    // Include contact_status so rows have it available for display/sort
-    'default_columns' => ['first_name', 'last_name', 'email', 'phone', 'contact_status', 'created_at', 'updated_at'],
+    // Include contact_status and contact_owner so rows have them available for display/sort
+    'default_columns' => [
+        'first_name',
+        'last_name',
+        'email',
+        'phone',
+        'contact_status',
+        'contact_owner',
+        'created_at',
+        'updated_at'
+    ],
     'column_labels' => [
         'first_name'      => 'First Name',
         'last_name'       => 'Last Name',
@@ -40,6 +49,7 @@ $config = [
         'updated_at'      => 'Last Update',
         'company'         => 'Company',       // Virtual column via JOIN in list_view (sort-enabled)
         'contact_status'  => 'Status',
+        'contact_owner'   => 'Owner',
     ],
     'filter_types' => [
         'first_name'      => 'text',
@@ -49,10 +59,12 @@ $config = [
         'created_at'      => 'date_range',
         'updated_at'      => 'date_range',
         'contact_status'  => 'dropdown',      // <-- Renders as a select
+        'contact_owner'   => 'dropdown',      // <-- Filter by owner (distinct values)
     ],
-    // Provide static dropdown choices so it’s a curated select (no typing)
+    // Provide static dropdown choices so it’s a curated select (no typing) for status;
+    // owner list will be built from DISTINCT values so we leave it empty here.
     'filter_options' => [
-        'contact_status' => $contactStatusOptions, // <-- Options for the dropdown
+        'contact_status' => $contactStatusOptions,
     ],
 ];
 
@@ -65,8 +77,9 @@ $ALLOWED_COLUMNS = [
     'last_name'       => 'last_name',
     'email'           => 'email',
     'phone'           => 'phone',
-    'company'         => 'company',        // now enabled (JOIN sort)
-    'contact_status'  => 'contact_status', // <-- enable sort on Status
+    'company'         => 'company',         // now enabled (JOIN sort)
+    'contact_status'  => 'contact_status',  // <-- enable sort on Status
+    'contact_owner'   => 'contact_owner',   // <-- enable sort on Owner
     'created_at'      => 'created_at',
     'updated_at'      => 'updated_at',
 ];
@@ -76,7 +89,8 @@ $S = ot_get_sort($ALLOWED_COLUMNS, 'last_name', 'asc');
 
 try {
     // Get filtered/sorted rows + filter form HTML
-    list($contacts, $filter_html, $sort_col, $sort_dir, $pager_html, $page_meta) = get_list_view_data($pdo, $config);
+    list($contacts, $filter_html, $sort_col, $sort_dir, $pager_html, $page_meta)
+        = get_list_view_data($pdo, $config);
 
     // Bulk-lookup client names for links (keeps your existing UI)
     $clientIds = [];
@@ -87,7 +101,7 @@ try {
     }
     $clientIds = array_values(array_unique(array_filter($clientIds)));
     if ($clientIds) {
-        $in = implode(',', array_fill(0, count($clientIds), '?'));
+        $in   = implode(',', array_fill(0, count($clientIds), '?'));
         $stmt = $pdo->prepare("SELECT id, name FROM clients WHERE id IN ($in)");
         $stmt->execute($clientIds);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -96,7 +110,8 @@ try {
         }
     }
 } catch (Throwable $e) {
-    echo "<div class='alert alert-danger'>Error loading contacts: " . htmlspecialchars($e->getMessage()) . "</div>";
+    echo "<div class='alert alert-danger'>Error loading contacts: " .
+         htmlspecialchars($e->getMessage()) . "</div>";
     $filter_html = '';
 }
 ?>
@@ -139,37 +154,50 @@ try {
                 <thead class="table-dark">
                     <tr>
                         <th>
-                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('last_name')) ?>">
+                            <a class="text-white text-decoration-none"
+                               href="<?= htmlspecialchars(($S['link'])('last_name')) ?>">
                                 Name<?= htmlspecialchars(($S['arrow'])('last_name')) ?>
                             </a>
                         </th>
                         <th>
-                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('email')) ?>">
+                            <a class="text-white text-decoration-none"
+                               href="<?= htmlspecialchars(($S['link'])('email')) ?>">
                                 Email<?= htmlspecialchars(($S['arrow'])('email')) ?>
                             </a>
                         </th>
                         <th>
-                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('phone')) ?>">
+                            <a class="text-white text-decoration-none"
+                               href="<?= htmlspecialchars(($S['link'])('phone')) ?>">
                                 Phone<?= htmlspecialchars(($S['arrow'])('phone')) ?>
                             </a>
                         </th>
                         <th>
-                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('company')) ?>">
+                            <a class="text-white text-decoration-none"
+                               href="<?= htmlspecialchars(($S['link'])('company')) ?>">
                                 Company<?= htmlspecialchars(($S['arrow'])('company')) ?>
                             </a>
                         </th>
                         <th>
-                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('contact_status')) ?>">
+                            <a class="text-white text-decoration-none"
+                               href="<?= htmlspecialchars(($S['link'])('contact_status')) ?>">
                                 Status<?= htmlspecialchars(($S['arrow'])('contact_status')) ?>
                             </a>
                         </th>
                         <th>
-                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('created_at')) ?>">
+                            <a class="text-white text-decoration-none"
+                               href="<?= htmlspecialchars(($S['link'])('contact_owner')) ?>">
+                                Owner<?= htmlspecialchars(($S['arrow'])('contact_owner')) ?>
+                            </a>
+                        </th>
+                        <th>
+                            <a class="text-white text-decoration-none"
+                               href="<?= htmlspecialchars(($S['link'])('created_at')) ?>">
                                 Created<?= htmlspecialchars(($S['arrow'])('created_at')) ?>
                             </a>
                         </th>
                         <th>
-                            <a class="text-white text-decoration-none" href="<?= htmlspecialchars(($S['link'])('updated_at')) ?>">
+                            <a class="text-white text-decoration-none"
+                               href="<?= htmlspecialchars(($S['link'])('updated_at')) ?>">
                                 Last Update<?= htmlspecialchars(($S['arrow'])('updated_at')) ?>
                             </a>
                         </th>
@@ -189,7 +217,7 @@ try {
                                 <td><?= htmlspecialchars($contact['phone'] ?? '') ?></td>
                                 <td>
                                     <?php
-                                        $cid = isset($contact['client_id']) ? (int)$contact['client_id'] : 0;
+                                        $cid   = isset($contact['client_id']) ? (int)$contact['client_id'] : 0;
                                         $cname = $cid && isset($clientNames[$cid]) ? $clientNames[$cid] : null;
                                     ?>
                                     <?php if ($cid && $cname): ?>
@@ -207,14 +235,24 @@ try {
                                             echo '<span class="text-muted">—</span>';
                                         } else {
                                             // Neutral compact badge (no category color yet)
-                                            echo '<span class="badge bg-secondary">'.htmlspecialchars($status).'</span>';
+                                            echo '<span class="badge bg-secondary">' .
+                                                 htmlspecialchars($status) . '</span>';
                                         }
+                                    ?>
+                                </td>
+                                <td>
+                                    <?php
+                                        $owner = trim((string)($contact['contact_owner'] ?? ''));
+                                        echo $owner !== ''
+                                            ? htmlspecialchars($owner)
+                                            : '<span class="text-muted">—</span>';
                                     ?>
                                 </td>
                                 <td><?= htmlspecialchars($contact['created_at'] ?? '') ?></td>
                                 <td><?= htmlspecialchars($contact['updated_at'] ?? '') ?></td>
                                 <td>
-                                    <a href="edit_contact.php?id=<?= (int)$contact['id'] ?>" class="btn btn-warning btn-sm">Edit</a>
+                                    <a href="edit_contact.php?id=<?= (int)$contact['id'] ?>"
+                                       class="btn btn-warning btn-sm">Edit</a>
                                     <a href="delete_contact.php?id=<?= (int)$contact['id'] ?>"
                                        class="btn btn-sm btn-danger"
                                        onclick="return confirm('Are you sure you want to delete this contact?');">
@@ -225,7 +263,7 @@ try {
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr>
-                            <td colspan="8" class="text-center">No contacts found.</td>
+                            <td colspan="9" class="text-center">No contacts found.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
@@ -294,7 +332,7 @@ try {
     // Existing table column resize
     document.addEventListener('DOMContentLoaded', function () {
         const table = document.getElementById('resizableContacts');
-        const cols = table ? table.querySelectorAll('th') : [];
+        const cols  = table ? table.querySelectorAll('th') : [];
         cols.forEach(th => {
             const resizer = document.createElement('div');
             resizer.classList.add('resizer');
@@ -306,7 +344,7 @@ try {
 
         function initResize(e) {
             currentCol = e.target.parentElement;
-            startX = e.clientX;
+            startX     = e.clientX;
             startWidth = currentCol.offsetWidth;
             document.addEventListener('mousemove', resizeColumn);
             document.addEventListener('mouseup', stopResize);
@@ -348,8 +386,8 @@ try {
 
         function onMouseDown(e) {
             dragging = true;
-            startX = e.clientX;
-            startW = sidebar.getBoundingClientRect().width;
+            startX   = e.clientX;
+            startW   = sidebar.getBoundingClientRect().width;
             dragbar.classList.add('lv-active');
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('mouseup', onMouseUp);
@@ -359,7 +397,7 @@ try {
         function onMouseMove(e) {
             if (!dragging) return;
             const delta = e.clientX - startX;
-            let newW = Math.round(startW + delta);
+            let newW    = Math.round(startW + delta);
             if (newW < MIN_W) newW = MIN_W;
             if (newW > MAX_W) newW = MAX_W;
             sidebar.style.width = newW + 'px';
@@ -383,8 +421,8 @@ try {
         dragbar.addEventListener('touchstart', (e) => {
             if (!e.touches || !e.touches[0]) return;
             dragging = true;
-            startX = e.touches[0].clientX;
-            startW = sidebar.getBoundingClientRect().width;
+            startX   = e.touches[0].clientX;
+            startW   = sidebar.getBoundingClientRect().width;
             dragbar.classList.add('lv-active');
             document.addEventListener('touchmove', onTouchMove, { passive: false });
             document.addEventListener('touchend', onTouchEnd);
@@ -394,11 +432,12 @@ try {
             if (!dragging || !e.touches || !e.touches[0]) return;
             e.preventDefault();
             const delta = e.touches[0].clientX - startX;
-            let newW = Math.round(startW + delta);
+            let newW    = Math.round(startW + delta);
             if (newW < MIN_W) newW = MIN_W;
             if (newW > MAX_W) newW = MAX_W;
             sidebar.style.width = newW + 'px';
         }
+
         function onTouchEnd() {
             if (!dragging) return;
             dragging = false;
@@ -413,4 +452,4 @@ try {
     })();
 </script>
 
-<?php require_once '../includes/footer.php'; ?>
+<?php require_once __DIR__ . '/../includes/footer.php'; ?>

@@ -6,6 +6,7 @@
  */
 return [
     'Leads' => [
+        'No Contact',          // New: never reached / haven’t tried yet
         'New / Lead Added',
     ],
 

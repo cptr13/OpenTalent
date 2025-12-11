@@ -11,6 +11,9 @@ if (!$id) {
 }
 
 $stmt = $pdo->prepare("SELECT * FROM clients WHERE id = ?");
+if (!$stmt) {
+    throw new Exception("Failed to prepare statement");
+}
 $stmt->execute([$id]);
 $client = $stmt->fetch();
 
@@ -25,14 +28,28 @@ $status_options = [
     'Inactive',
     'Prospect',
     'Closed',
-    'On Hold'
+    'On Hold',
+    'Not a fit',      // NEW
+];
+
+// LinkedIn-style company size options
+$company_size_options = [
+    'Myself Only',
+    '2–10 employees',
+    '11–50 employees',
+    '51–200 employees',
+    '201–500 employees',
+    '501–1,000 employees',
+    '1,001–5,000 employees',
+    '5,001–10,000 employees',
+    '10,001+ employees',
 ];
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>Edit Client</h2>
     <div class="d-flex align-items-center">
-        <!-- NEW: Top-right Update button submits the form below -->
+        <!-- Top-right Update button submits the form below -->
         <button type="submit" form="editClientForm" class="btn btn-success me-2">Update Client</button>
         <a href="delete_client.php?id=<?= htmlspecialchars($client['id']) ?>" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this client?');">Delete</a>
     </div>
@@ -61,6 +78,19 @@ $status_options = [
         <input type="text" name="website" id="website" class="form-control" value="<?= htmlspecialchars($client['url']) ?>">
     </div>
 
+    <!-- NEW: LinkedIn URL -->
+    <div class="mb-3">
+        <label for="linkedin" class="form-label">LinkedIn URL</label>
+        <input
+            type="text"
+            name="linkedin"
+            id="linkedin"
+            class="form-control"
+            value="<?= htmlspecialchars($client['linkedin'] ?? '') ?>"
+        >
+    </div>
+    <!-- /LinkedIn URL -->
+
     <div class="mb-3">
         <label for="location" class="form-label">Location</label>
         <input type="text" name="location" id="location" class="form-control" value="<?= htmlspecialchars($client['location']) ?>">
@@ -71,11 +101,26 @@ $status_options = [
         <input type="text" name="industry" id="industry" class="form-control" value="<?= htmlspecialchars($client['industry']) ?>">
     </div>
 
+    <!-- Company Size dropdown -->
+    <div class="mb-3">
+        <label for="company_size" class="form-label">Company Size</label>
+        <select name="company_size" id="company_size" class="form-select">
+            <option value="">-- Select Company Size --</option>
+            <?php foreach ($company_size_options as $option): ?>
+                <option value="<?= htmlspecialchars($option) ?>"
+                    <?= (isset($client['company_size']) && $client['company_size'] === $option) ? 'selected' : '' ?>>
+                    <?= htmlspecialchars($option) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+    </div>
+    <!-- /Company Size -->
+
     <div class="mb-3">
         <label for="status" class="form-label">Status</label>
         <select name="status" id="status" class="form-select">
             <?php foreach ($status_options as $option): ?>
-                <option value="<?= $option ?>" <?= $client['status'] === $option ? 'selected' : '' ?>>
+                <option value="<?= htmlspecialchars($option) ?>" <?= $client['status'] === $option ? 'selected' : '' ?>>
                     <?= htmlspecialchars($option) ?>
                 </option>
             <?php endforeach; ?>

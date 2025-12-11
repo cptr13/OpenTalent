@@ -5,6 +5,8 @@ error_reporting(E_ALL);
 require_once __DIR__ . '/../includes/require_login.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/mailer.php';
+require_once __DIR__ . '/../config/status.php';       // getStatusList('contact')
+require_once __DIR__ . '/../includes/kpi_logger.php'; // kpi_log_sales_status_change
 
 use PHPMailer\PHPMailer\Exception;
 
@@ -24,6 +26,9 @@ $related_type = $_POST['related_type']      ?? 'none'; // 'contact' | 'candidate
 $related_id   = (int)($_POST['related_id']  ?? 0);
 $return_to    = $_POST['return_to']         ?? '';
 $force_debug  = !empty($_POST['__debug']);
+
+// Optional: status hint from compose_email.php for contacts
+$log_contact_status = trim($_POST['log_contact_status'] ?? '');
 
 // Basic validation
 if (!$to_email || !$subject || $body_html === '') {
@@ -149,9 +154,9 @@ try {
     $mergeVars = ot_build_merge_vars($pdo, $related_type, $related_id, $to_name);
 
     // Render placeholders before sending/logging
-    $rendered_subject  = ot_render_placeholders($subject, $mergeVars);
+    $rendered_subject   = ot_render_placeholders($subject, $mergeVars);
     $rendered_body_html = ot_render_placeholders($body_html, $mergeVars);
-    $rendered_alt = strip_tags($rendered_body_html);
+    $rendered_alt       = strip_tags($rendered_body_html);
 
     // Early check: if SMTP not configured, ot_build_mailer will throw with a safe message.
     $mail = ot_build_mailer($pdo);
@@ -277,6 +282,62 @@ try {
         ]);
     }
 
+    // ---- NEW: If this was a contact email + we have a log_contact_status, update contact status + KPI ----
+    if ($status === 'sent'
+        && $related_type === 'contact'
+        && $related_id > 0
+        && $log_contact_status !== '') {
+
+        // Validate the requested status against the contact status list
+        $isValidStatus = false;
+        try {
+            $contactStatusList = getStatusList('contact'); // ['Category' => ['Sub', ...]]
+            foreach ($contactStatusList as $cat => $subs) {
+                if (in_array($log_contact_status, $subs, true)) {
+                    $isValidStatus = true;
+                    break;
+                }
+            }
+        } catch (Throwable $e) {
+            $isValidStatus = false;
+        }
+
+        if ($isValidStatus) {
+            // Lock + fetch current status
+            $cur = $pdo->prepare("SELECT contact_status FROM contacts WHERE id = :id FOR UPDATE");
+            $cur->execute([':id' => $related_id]);
+            $row = $cur->fetch(PDO::FETCH_ASSOC);
+            $old_status = $row ? (string)($row['contact_status'] ?? '') : '';
+
+            // Update status to the new value (even if it's the same, to keep consistent)
+            $upd = $pdo->prepare("UPDATE contacts SET contact_status = :status WHERE id = :id");
+            $upd->execute([
+                ':status' => $log_contact_status,
+                ':id'     => $related_id,
+            ]);
+
+            // Auto note on the contact to record this touch
+            $autoNote = $pdo->prepare("
+                INSERT INTO notes (module_type, module_id, content, created_at)
+                VALUES ('contact', :module_id, :content, NOW())
+            ");
+            $autoNote->execute([
+                ':module_id' => $related_id,
+                ':content'   => "Status logged: {$log_contact_status} (via outbound email send)",
+            ]);
+
+            // KPI: treat this exactly like a contact status change/log
+            $user_id = $_SESSION['user_id'] ?? ($_SESSION['user']['id'] ?? null);
+            $user_id = (is_numeric($user_id) && (int)$user_id > 0) ? (int)$user_id : 1;
+
+            try {
+                kpi_log_sales_status_change($pdo, $related_id, $log_contact_status, $old_status, $user_id);
+            } catch (Throwable $e) {
+                // Optional: error_log('KPI sales log (email) failed: ' . $e->getMessage());
+            }
+        }
+    }
+
     $pdo->commit();
 
     // Redirect back to the record page when provided
@@ -290,7 +351,7 @@ try {
         echo "<div class='alert alert-success'>Email sent.</div>";
     } else {
         echo "<div class='alert alert-danger'><strong>Send failed.</strong></div>";
-        echo "<pre style='white-space:pre-wrap;max-height:400px;overflow:auto;border:1px solid #ddd;padding:.75rem;'>" . h($error) . "</pre>";
+        echo "<pre style='white-space:pre-wrap;max-height:400px;overflow:auto;border:1px solid #ddd;padding=.75rem;'>" . h($error) . "</pre>";
     }
     echo '<p><a href="compose_email.php">Send another</a></p>';
 

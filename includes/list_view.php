@@ -218,6 +218,7 @@ function get_list_view_data(PDO $pdo, array $config)
             'owner'          => $qcol('contact_owner'),
             'contact_status' => $qcol('contact_status'),
             'created_at'     => $qcol('created_at'),
+            'updated_at'     => $qcol('updated_at'),  // Last Update sorting
             'company'        => "$cl." . $bt('name'),
         ];
         $order_expr = $sort_map[$sort_col] ?? $qcol('last_name');
@@ -302,7 +303,8 @@ function get_list_view_data(PDO $pdo, array $config)
 
         ob_start();
         echo "<div class='d-flex flex-column flex-sm-row justify-content-between align-items-center gap-2 mt-3'>";
-        echo "<div class='text-muted'>Showing $from–$to of $total</div>";
+        // *** FIXED LINE ***
+        echo "<div class='text-muted'>Showing {$from}&ndash;{$to} of {$total}</div>";
 
         $first_disabled = ($page <= 1) ? ' disabled' : '';
         $prev_disabled  = ($page <= 1) ? ' disabled' : '';
@@ -533,7 +535,8 @@ function get_list_view_data(PDO $pdo, array $config)
 
     ob_start();
     echo "<div class='d-flex flex-column flex-sm-row justify-content-between align-items-center gap-2 mt-3'>";
-    echo "<div class='text-muted'>Showing $from–$to of $total</div>";
+    // *** FIXED LINE (generic pager) ***
+    echo "<div class='text-muted'>Showing {$from}&ndash;{$to} of {$total}</div>";
 
     $first_disabled = ($page <= 1) ? ' disabled' : '';
     $prev_disabled  = ($page <= 1) ? ' disabled' : '';

@@ -31,6 +31,9 @@ $title           = trim($_POST['title'] ?? '');
 $email           = trim($_POST['email'] ?? '');
 $phone           = trim($_POST['phone'] ?? '');
 
+// NEW: LinkedIn URL
+$linkedin        = trim($_POST['linkedin'] ?? '');
+
 /* --- NEW: address fields --- */
 $address_street  = trim($_POST['address_street']  ?? '');
 $address_city    = trim($_POST['address_city']    ?? '');
@@ -66,7 +69,7 @@ try {
 try {
     $pdo->beginTransaction();
 
-    // Update core fields (+ address fields)
+    // Update core fields (+ address fields + linkedin)
     $sql = "
         UPDATE contacts
            SET client_id        = :client_id,
@@ -75,6 +78,7 @@ try {
                title            = :title,
                email            = :email,
                phone            = :phone,
+               linkedin         = :linkedin,
 
                address_street   = :address_street,
                address_city     = :address_city,
@@ -100,6 +104,7 @@ try {
         ':title'            => $title,
         ':email'            => $email,
         ':phone'            => $phone,
+        ':linkedin'         => ($linkedin !== '' ? $linkedin : null),
 
         ':address_street'   => ($address_street  !== '' ? $address_street  : null),
         ':address_city'     => ($address_city    !== '' ? $address_city    : null),

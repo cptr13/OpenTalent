@@ -16,6 +16,13 @@ $return_to    = $_GET['return_to']    ?? '';
 
 function h($v){ return htmlspecialchars((string)($v ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 
+// If this email is tied to a CONTACT, we want sending it to count as:
+// "Contact Attempt - Email Sent" in the Contact Status/KPI pipeline.
+$log_contact_status = null;
+if ($related_type === 'contact' && $related_id > 0) {
+    $log_contact_status = 'Contact Attempt - Email Sent';
+}
+
 // SMTP status + current config
 $isAdmin = isset($_SESSION['user']['role']) && $_SESSION['user']['role'] === 'admin';
 $status  = ot_mailer_status();           // ['ok'=>bool,'reason'=>string|null]
@@ -103,6 +110,11 @@ $mergeData = array_merge($recipientData, $userData, [
         <input type="hidden" name="related_type" value="<?= h($related_type) ?>">
         <input type="hidden" name="related_id" value="<?= (int)$related_id ?>">
         <input type="hidden" name="return_to" value="<?= h($return_to) ?>">
+
+        <?php if ($log_contact_status !== null): ?>
+          <!-- Hint to send_email.php: after successful send, log this status for the related contact -->
+          <input type="hidden" name="log_contact_status" value="<?= h($log_contact_status) ?>">
+        <?php endif; ?>
 
         <div class="mb-3">
           <label class="form-label">To</label>

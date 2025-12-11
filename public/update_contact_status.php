@@ -30,11 +30,15 @@ $valid = false;
 try {
     $statusList = getStatusList('contact'); // ['Category' => ['Sub1', ...], ...]
     foreach ($statusList as $category => $subs) {
-        if (in_array($new_status, $subs, true)) { $valid = true; break; }
+        if (in_array($new_status, $subs, true)) {
+            $valid = true;
+            break;
+        }
     }
 } catch (Throwable $e) {
     $valid = false;
 }
+
 if (!$valid) {
     header('Location: ' . $return_to . '&error=' . urlencode('Invalid contact status.'));
     exit;
@@ -47,39 +51,46 @@ try {
     $cur = $pdo->prepare("SELECT contact_status FROM contacts WHERE id = :id FOR UPDATE");
     $cur->execute([':id' => $contact_id]);
     $row = $cur->fetch(PDO::FETCH_ASSOC);
+
     if (!$row) {
         $pdo->rollBack();
         header('Location: ' . $return_to . '&error=' . urlencode('Contact not found.'));
         exit;
     }
+
     $old_status = (string)($row['contact_status'] ?? '');
 
-    // Only update + auto-note + KPI if the status actually changed
-    if ($old_status !== $new_status) {
-        $upd = $pdo->prepare("UPDATE contacts SET contact_status = :status WHERE id = :id");
-        $upd->execute([
-            ':status' => $new_status,
-            ':id'     => $contact_id,
-        ]);
+    // Always update the status (even if unchanged) so the DB matches what you just selected
+    $upd = $pdo->prepare("UPDATE contacts SET contact_status = :status WHERE id = :id");
+    $upd->execute([
+        ':status' => $new_status,
+        ':id'     => $contact_id,
+    ]);
 
-        // Auto status-change note on the CONTACT
-        $auto = $pdo->prepare("
-            INSERT INTO notes (module_type, module_id, content, created_at)
-            VALUES ('contact', :module_id, :content, NOW())
-        ");
-        $auto->execute([
-            ':module_id' => $contact_id,
-            ':content'   => "Status changed: " . ($old_status !== '' ? $old_status : '—') . " → {$new_status}",
-        ]);
+    // Auto note to record the touch
+    // - If status changed: "Status changed: Old → New"
+    // - If same:          "Status logged: New"
+    $autoNoteText = ($old_status !== $new_status)
+        ? "Status changed: " . ($old_status !== '' ? $old_status : '—') . " → {$new_status}"
+        : "Status logged: {$new_status}";
 
-        // KPI logging (sales-side)
-        $user_id = $_SESSION['user_id'] ?? ($_SESSION['user']['id'] ?? null);
-        $user_id = (is_numeric($user_id) && (int)$user_id > 0) ? (int)$user_id : 1;
-        try {
-            kpi_log_sales_status_change($pdo, $contact_id, $new_status, $old_status, $user_id);
-        } catch (Throwable $e) {
-            // Optional: error_log('KPI sales log failed: ' . $e->getMessage());
-        }
+    $auto = $pdo->prepare("
+        INSERT INTO notes (module_type, module_id, content, created_at)
+        VALUES ('contact', :module_id, :content, NOW())
+    ");
+    $auto->execute([
+        ':module_id' => $contact_id,
+        ':content'   => $autoNoteText,
+    ]);
+
+    // KPI logging (sales-side) — now logs EVERY time you hit Update Status
+    $user_id = $_SESSION['user_id'] ?? ($_SESSION['user']['id'] ?? null);
+    $user_id = (is_numeric($user_id) && (int)$user_id > 0) ? (int)$user_id : 1;
+
+    try {
+        kpi_log_sales_status_change($pdo, $contact_id, $new_status, $old_status, $user_id);
+    } catch (Throwable $e) {
+        // Optional: error_log('KPI sales log failed: ' . $e->getMessage());
     }
 
     // Optional manual note (always attach to CONTACT)
@@ -99,7 +110,9 @@ try {
     exit;
 
 } catch (Throwable $e) {
-    if ($pdo->inTransaction()) $pdo->rollBack();
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
     header('Location: ' . $return_to . '&error=' . urlencode('Failed to update status: ' . $e->getMessage()));
     exit;
 }

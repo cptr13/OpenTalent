@@ -85,7 +85,7 @@ $error = $_GET['error'] ?? null;
 
 // ----- Contact Status List (entity-aware) -----
 $contactStatusList = getStatusList('contact'); // ['Category' => ['Sub1', 'Sub2', ...]]
-$currentContactStatus = $contact['contact_status'] ?? ''; // safe if column not present
+$currentContactStatus = $contact['contact_status'] ?? '';
 
 // Grab outreach stage for the Scripts panel context
 $defaultStage = isset($contact['outreach_stage']) && (int)$contact['outreach_stage'] > 0 ? (int)$contact['outreach_stage'] : 1;
@@ -117,14 +117,16 @@ $regionDisplay = null;
 try {
     $regionDisplay = infer_region_from_parts($addrCity, $addrState, $addrCountry);
     if ($regionDisplay === null) {
-        // Fallback: try a single raw location string if parts are sparse
-        $raw = trim(implode(', ', array_filter([$addrStreet, $addrCity, $addrState, $addrZip, $addrCountry], fn($x) => $x !== '')));
+        $raw = trim(implode(', ', array_filter(
+            [$addrStreet, $addrCity, $addrState, $addrZip, $addrCountry],
+            fn($x) => $x !== ''
+        )));
         if ($raw !== '') {
             $regionDisplay = infer_region_from_location($raw);
         }
     }
 } catch (Throwable $e) {
-    $regionDisplay = null; // display gracefully as —
+    $regionDisplay = null;
 }
 
 /**
@@ -134,7 +136,6 @@ try {
  */
 function build_cadence_labels(bool $haveCadenceLookup): array
 {
-    // Known voicemail fallback (your previous labels)
     $fallbackVoicemail = [
         1  => 'Touch 1 – Voicemail #1',
         2  => 'Touch 2 – Voicemail #2',
@@ -152,7 +153,6 @@ function build_cadence_labels(bool $haveCadenceLookup): array
 
     $labels = [
         'voicemail' => $fallbackVoicemail,
-        // If mixed isn’t defined centrally, synthesize a simple 12-step mixed fallback
         'mixed'     => [
             1  => 'Touch 1 – Mixed #1',
             2  => 'Touch 2 – Mixed #2',
@@ -173,7 +173,6 @@ function build_cadence_labels(bool $haveCadenceLookup): array
         return $labels;
     }
 
-    // Build from cadence_lookup for both cadence types.
     $types = ['voicemail','mixed'];
     foreach ($types as $type) {
         $built = [];
@@ -197,7 +196,6 @@ function build_cadence_labels(bool $haveCadenceLookup): array
 
 $cadenceLabels = build_cadence_labels($haveCadenceLookup);
 
-// Ensure current stage exists for current cadence; if not, reset to 1
 if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
     $defaultStage = array_key_first($cadenceLabels[$currentCadence]) ?: 1;
 }
@@ -214,7 +212,6 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="mb-0"><?= h(trim(($contact['first_name'] ?? '') . ' ' . ($contact['last_name'] ?? ''))) ?></h2>
         <div class="d-flex align-items-center gap-2">
-            <!-- Scripts button now scrolls to the Scripts panel (no modal) -->
             <button
                 type="button"
                 class="btn btn-sm btn-outline-secondary"
@@ -232,9 +229,10 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
         </div>
     </div>
 
-    <div class="row g-4">
-        <!-- Contact Info (now also shows Address + Region) -->
-        <div class="col-md-4">
+    <!-- Draggable + collapsible grid -->
+    <div class="row g-4" id="card-grid">
+        <!-- Contact Info -->
+        <div class="col-md-4 draggable-card-wrapper" data-card-id="contact_info">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>Contact Info</span>
@@ -247,7 +245,6 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                         <p><strong>LinkedIn:</strong> <a href="<?= h($contact['linkedin']) ?>" target="_blank" rel="noopener">View Profile</a></p>
                     <?php endif; ?>
 
-                    <!-- Address block -->
                     <?php if ($line1 !== '' || $line2 !== '' || $line3 !== ''): ?>
                         <div class="mt-3">
                             <strong>Address:</strong>
@@ -259,14 +256,13 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                         <p class="mt-3"><strong>Address:</strong> <span class="text-muted">—</span></p>
                     <?php endif; ?>
 
-                    <!-- Auto Region display -->
                     <p class="mt-2"><strong>Region (auto):</strong> <?= h($regionDisplay ?? '—') ?></p>
                 </div>
             </div>
         </div>
 
         <!-- Position & Company -->
-        <div class="col-md-4">
+        <div class="col-md-4 draggable-card-wrapper" data-card-id="position_company">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>Position & Company</span>
@@ -287,10 +283,12 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
             </div>
         </div>
 
-        <!-- Follow-Up -->
-        <div class="col-md-4">
+        <!-- Follow-Up + Outreach -->
+        <div class="col-md-4 draggable-card-wrapper" data-card-id="follow_up_outreach">
             <div class="card mb-3">
-                <div class="card-header">Follow-Up</div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>Follow-Up</span>
+                </div>
                 <div class="card-body">
                     <form method="POST" action="update_follow_up.php">
                         <input type="hidden" name="id" value="<?= (int)$contact['id'] ?>">
@@ -310,7 +308,6 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                     <span class="badge bg-info-subtle text-dark border">Cadence: <?= h(ucfirst($currentCadence)) ?></span>
                 </div>
                 <div class="card-body">
-                    <!-- One form handles BOTH cadence and stage so the selection persists -->
                     <form method="POST" action="update_outreach_stage.php" class="mb-2" id="formOutreach">
                         <input type="hidden" name="id" value="<?= (int)$contact['id'] ?>">
 
@@ -322,9 +319,7 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
 
                         <label class="mb-1"><strong>Stage:</strong></label>
                         <select name="outreach_stage" id="outreach_stage" class="form-select form-select-sm mt-1 mb-2" onchange="confirmStageChange(this.form)">
-                            <?php
-                            foreach ($cadenceLabels[$currentCadence] as $stageNum => $label):
-                            ?>
+                            <?php foreach ($cadenceLabels[$currentCadence] as $stageNum => $label): ?>
                                 <option value="<?= (int)$stageNum ?>" <?= ((int)$defaultStage === (int)$stageNum) ? 'selected' : '' ?>>
                                     <?= h($label) ?>
                                 </option>
@@ -351,11 +346,9 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- NEW: Scripts Panel -->
-    <div class="row mt-4">
-        <div class="col-12">
+        <!-- Scripts Panel -->
+        <div class="col-12 draggable-card-wrapper" data-card-id="scripts">
             <div id="scripts-card" class="card">
                 <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
                     <span>Scripts</span>
@@ -406,13 +399,11 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                 <div class="card-body">
                     <div id="scriptError" class="alert alert-danger d-none mb-3"></div>
 
-                    <!-- Stage/Company line; JS will append Region/Location -->
                     <div id="stageLine" class="mb-2 small text-muted"
-                         data-base="Stage: Touch <?= (int)($defaultStage) ?> • Cadence: <?= h(ucfirst($currentCadence)) ?><?php if ($client): ?> • Company: <?= h($client['name']) ?><?php endif; ?>">
-                        Stage: Touch <?= (int)($defaultStage) ?> • Cadence: <?= h(ucfirst($currentCadence)) ?><?php if ($client): ?> • Company: <?= h($client['name']) ?><?php endif; ?>
+                         data-base="Stage: Touch <?= (int)$defaultStage ?> • Cadence: <?= h(ucfirst($currentCadence)) ?><?php if ($client): ?> • Company: <?= h($client['name']) ?><?php endif; ?>">
+                        Stage: Touch <?= (int)$defaultStage ?> • Cadence: <?= h(ucfirst($currentCadence)) ?><?php if ($client): ?> • Company: <?= h($client['name']) ?><?php endif; ?>
                     </div>
 
-                    <!-- NEW: Context badges (Region/Location) -->
                     <div id="contextBadges" class="mb-2"></div>
 
                     <textarea id="scriptOutput" class="form-control font-monospace" rows="8" readonly style="white-space: pre-wrap;"></textarea>
@@ -429,11 +420,9 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- NEW: Live Calls — Objections & Rebuttals -->
-    <div class="row mt-4">
-        <div class="col-12">
+        <!-- Rebuttals -->
+        <div class="col-12 draggable-card-wrapper" data-card-id="rebuttals">
             <div id="rebuttals-card" class="card">
                 <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
                     <span>Live Calls: Objections &amp; Rebuttals</span>
@@ -460,11 +449,9 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- NEW ROW: Contact Status (entity-scoped) -->
-    <div class="row mt-4">
-        <div class="col-md-6">
+        <!-- Contact Status -->
+        <div class="col-md-6 draggable-card-wrapper" data-card-id="contact_status">
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>Contact Status</span>
@@ -504,11 +491,9 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Associated Jobs -->
-    <div class="row mt-4">
-        <div class="col-12">
+        <!-- Associated Jobs -->
+        <div class="col-12 draggable-card-wrapper" data-card-id="associated_jobs">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>Associated Jobs</span>
@@ -530,14 +515,14 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Outreach Template Preview -->
-    <?php if ($outreach_template): ?>
-        <div class="row mt-4">
-            <div class="col-12">
+        <!-- Outreach Template -->
+        <?php if ($outreach_template): ?>
+            <div class="col-12 draggable-card-wrapper" data-card-id="outreach_template">
                 <div class="card">
-                    <div class="card-header">Outreach Template</div>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Outreach Template</span>
+                    </div>
                     <div class="card-body">
                         <p><strong>Channel:</strong> <?= ucfirst(h($outreach_template['channel'] ?? '')) ?></p>
                         <?php if (!empty($outreach_template['subject'])): ?>
@@ -549,14 +534,14 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                     </div>
                 </div>
             </div>
-        </div>
-    <?php endif; ?>
+        <?php endif; ?>
 
-    <!-- Notes Section -->
-    <div class="row mt-4">
-        <div class="col-md-12">
+        <!-- Notes -->
+        <div class="col-12 draggable-card-wrapper" data-card-id="notes">
             <div class="card mb-3">
-                <div class="card-header">Add Note</div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>Add Note</span>
+                </div>
                 <div class="card-body">
                     <form action="add_note.php" method="POST">
                         <input type="hidden" name="module_type" value="contact">
@@ -570,7 +555,9 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
             </div>
 
             <div class="card">
-                <div class="card-header">Past Notes</div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>Past Notes</span>
+                </div>
                 <div class="card-body">
                     <?php if (!empty($notes)): ?>
                         <?php foreach ($notes as $note): ?>
@@ -590,14 +577,42 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                 </div>
             </div>
         </div>
-    </div>
+    </div> <!-- /#card-grid -->
 </div>
 
 <style>
-/* small highlight when scrolling to Scripts card */
-#scripts-card.ring { box-shadow: 0 0 0 .25rem rgba(13,110,253,.25); transition: box-shadow .3s ease; }
-/* compact accordion buttons */
+#scripts-card.ring {
+    box-shadow: 0 0 0 .25rem rgba(13,110,253,.25);
+    transition: box-shadow .3s ease;
+}
 .rebuttal-copy-btn { white-space: nowrap; }
+
+/* Drag & drop */
+.draggable-card-wrapper {
+    cursor: move;
+}
+.draggable-card-wrapper.dragging {
+    opacity: 0.6;
+}
+.draggable-card-wrapper.drag-over {
+    outline: 2px dashed #0d6efd;
+    outline-offset: 2px;
+}
+
+/* Collapse behavior: hide everything but header */
+.card.card-collapsed > :not(.card-header) {
+    display: none !important;
+}
+
+/* Small toggle button */
+.card-toggle-btn {
+    width: 1.6rem;
+    height: 1.6rem;
+    padding: 0;
+    line-height: 1;
+    font-weight: bold;
+    font-size: 0.9rem;
+}
 </style>
 
 <script>
@@ -638,12 +653,183 @@ document.addEventListener('DOMContentLoaded', function() {
     const CONTACT_ID = '<?= (int)$contact['id'] ?>';
     const CLIENT_ID  = '<?= (int)($contact['client_id'] ?? 0) ?>';
 
-    // Centralized cadence labels embedded from PHP (built via cadence_lookup when available)
     const CADENCE_LABELS = <?= json_encode($cadenceLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 
-    let lastToneUsed = null; // from server response, used for logging
+    let lastToneUsed = null;
     let rebuttalDebounce = null;
 
+    const grid = document.getElementById('card-grid');
+    const LAYOUT_KEY = 'view_contact_layout_v1';
+    const COLLAPSE_KEY = 'view_contact_collapsed_v1';
+
+    // ---- Drag & Drop ----
+    let dragSrcWrapper = null;
+
+    function saveLayout() {
+        if (!grid) return;
+        const ids = [];
+        grid.querySelectorAll('.draggable-card-wrapper').forEach(el => {
+            if (el.dataset.cardId) ids.push(el.dataset.cardId);
+        });
+        try {
+            localStorage.setItem(LAYOUT_KEY, ids.join(','));
+        } catch (e) {
+            console.warn('Unable to save layout', e);
+        }
+    }
+
+    function applySavedLayout() {
+        if (!grid) return;
+        let saved = null;
+        try {
+            saved = localStorage.getItem(LAYOUT_KEY);
+        } catch (e) {
+            saved = null;
+        }
+        if (!saved) return;
+
+        const order = saved.split(',').map(s => s.trim()).filter(Boolean);
+        if (!order.length) return;
+
+        const map = {};
+        grid.querySelectorAll('.draggable-card-wrapper').forEach(el => {
+            const id = el.dataset.cardId;
+            if (id) map[id] = el;
+        });
+
+        order.forEach(id => {
+            if (map[id]) {
+                grid.appendChild(map[id]);
+            }
+        });
+    }
+
+    function handleDragStart(e) {
+        dragSrcWrapper = this;
+        this.classList.add('dragging');
+        if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', this.dataset.cardId || '');
+        }
+    }
+
+    function handleDragEnd() {
+        this.classList.remove('dragging');
+        grid.querySelectorAll('.draggable-card-wrapper').forEach(el => el.classList.remove('drag-over'));
+    }
+
+    function handleDragOver(e) {
+        e.preventDefault();
+        if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = 'move';
+        }
+    }
+
+    function handleDragEnter() {
+        if (this === dragSrcWrapper) return;
+        this.classList.add('drag-over');
+    }
+
+    function handleDragLeave() {
+        this.classList.remove('drag-over');
+    }
+
+    function handleDrop(e) {
+        e.preventDefault();
+        this.classList.remove('drag-over');
+        if (!dragSrcWrapper || dragSrcWrapper === this) return;
+        if (!grid) return;
+
+        const children = Array.from(grid.querySelectorAll('.draggable-card-wrapper'));
+        const srcIndex = children.indexOf(dragSrcWrapper);
+        const targetIndex = children.indexOf(this);
+
+        if (srcIndex < 0 || targetIndex < 0) return;
+
+        if (srcIndex < targetIndex) {
+            grid.insertBefore(dragSrcWrapper, this.nextSibling);
+        } else {
+            grid.insertBefore(dragSrcWrapper, this);
+        }
+        saveLayout();
+    }
+
+    function initDragDrop() {
+        if (!grid) return;
+        const wrappers = grid.querySelectorAll('.draggable-card-wrapper');
+        wrappers.forEach(el => {
+            el.setAttribute('draggable', 'true');
+            el.addEventListener('dragstart', handleDragStart);
+            el.addEventListener('dragend', handleDragEnd);
+            el.addEventListener('dragover', handleDragOver);
+            el.addEventListener('dragenter', handleDragEnter);
+            el.addEventListener('dragleave', handleDragLeave);
+            el.addEventListener('drop', handleDrop);
+        });
+    }
+
+    // ---- Collapse / Expand per card ----
+    function initCardCollapse() {
+        if (!grid) return;
+
+        let savedState = {};
+        try {
+            const raw = localStorage.getItem(COLLAPSE_KEY);
+            if (raw) savedState = JSON.parse(raw) || {};
+        } catch (e) {
+            savedState = {};
+        }
+
+        const wrappers = grid.querySelectorAll('.draggable-card-wrapper');
+        wrappers.forEach(wrapper => {
+            const cardId = wrapper.dataset.cardId;
+            const card = wrapper.querySelector('.card');
+            if (!card || !cardId) return;
+
+            const header = card.querySelector('.card-header');
+            if (!header) return;
+
+            // Make sure header has flex layout
+            if (!header.classList.contains('d-flex')) {
+                header.classList.add('d-flex', 'justify-content-between', 'align-items-center');
+            } else {
+                header.classList.add('align-items-center');
+            }
+
+            // Avoid double-adding
+            if (header.querySelector('.card-toggle-btn')) return;
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-sm btn-light border card-toggle-btn ms-2';
+            btn.innerHTML = '−';
+
+            btn.addEventListener('click', () => {
+                const collapsed = card.classList.toggle('card-collapsed');
+                btn.innerHTML = collapsed ? '+' : '−';
+                savedState[cardId] = collapsed ? 1 : 0;
+                try {
+                    localStorage.setItem(COLLAPSE_KEY, JSON.stringify(savedState));
+                } catch (e) {
+                    console.warn('Unable to save collapse state', e);
+                }
+            });
+
+            header.appendChild(btn);
+
+            // Apply saved state
+            if (savedState[cardId]) {
+                card.classList.add('card-collapsed');
+                btn.innerHTML = '+';
+            }
+        });
+    }
+
+    applySavedLayout();
+    initDragDrop();
+    initCardCollapse();
+
+    // ---- Scripts & Rebuttals logic ----
     function escapeHtml(s){
         return String(s)
             .replace(/&/g,'&amp;')
@@ -654,7 +840,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function updateContextUI(ctx){
-        // Badges
         const region = ctx && ctx.region ? String(ctx.region) : '';
         const loc    = ctx && ctx.location ? String(ctx.location) : '';
 
@@ -663,7 +848,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (loc)    chips.push('<span class="badge rounded-pill text-bg-light border me-1">Location: ' + escapeHtml(loc) + '</span>');
         badgesEl.innerHTML = chips.length ? chips.join(' ') : '<span class="text-muted">—</span>';
 
-        // Stage/Company line with appended context
         const base = stageLineEl.getAttribute('data-base') || stageLineEl.textContent || '';
         let extra = '';
         if (region) extra += ' • Region: ' + region;
@@ -676,10 +860,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const currentValue = stageSelectEl ? stageSelectEl.value : '';
         if (!stageSelectEl) return;
 
-        // Clear options
         while (stageSelectEl.firstChild) stageSelectEl.removeChild(stageSelectEl.firstChild);
 
-        // Rebuild
         Object.keys(labels).forEach(k => {
             const opt = document.createElement('option');
             opt.value = String(k);
@@ -687,7 +869,6 @@ document.addEventListener('DOMContentLoaded', function() {
             stageSelectEl.appendChild(opt);
         });
 
-        // Try to keep the same stage selected; fall back to first available
         if (currentValue && labels[currentValue]) {
             stageSelectEl.value = currentValue;
         } else {
@@ -697,6 +878,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function renderScript() {
+        if (!outputEl || !stageLineEl) return;
+
         errorBox.classList.add('d-none');
         errorBox.textContent = '';
 
@@ -706,18 +889,16 @@ document.addEventListener('DOMContentLoaded', function() {
         const toneVal    = toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto';
 
         const params = new URLSearchParams({
-            // legacy keys (kept)
             script_type: scriptTypeVal,
             tone: toneVal,
-            // expected keys for renderer/ajax
             script_type_slug: scriptTypeVal,
             tone_mode: toneVal,
             touch_number: stageVal,
             delivery_type: scriptTypeVal,
             contact_id: CONTACT_ID,
             client_id: CLIENT_ID,
-            include_smalltalk: toggleSmall.checked ? '1' : '0',
-            include_micro_offer: toggleOffer.checked ? '1' : '0',
+            include_smalltalk: toggleSmall && toggleSmall.checked ? '1' : '0',
+            include_micro_offer: toggleOffer && toggleOffer.checked ? '1' : '0',
             cadence_type: cadenceVal,
             _ts: String(Date.now())
         });
@@ -744,7 +925,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error(`Render failed: ${msg}`);
             }
 
-            // Force the textarea to repaint so tone changes are always visible
             outputEl.value = '';
             setTimeout(() => {
                 outputEl.value = data.text || '';
@@ -753,7 +933,10 @@ document.addEventListener('DOMContentLoaded', function() {
             lastToneUsed = data.tone_used || null;
 
             const toneMode = toneVal;
-            toneBadge.textContent = 'Tone: ' + (toneMode === 'auto' ? 'Auto' : (toneMode.charAt(0).toUpperCase() + toneMode.slice(1) + ' (override)'));
+            toneBadge.textContent = 'Tone: ' + (toneMode === 'auto'
+                ? 'Auto'
+                : (toneMode.charAt(0).toUpperCase() + toneMode.slice(1) + ' (override)')
+            );
             toneUsedLabel.textContent = 'Tone used: ' + (data.tone_used || '—');
             templateName.textContent = 'Template: ' + (data.template_name || '—');
 
@@ -812,9 +995,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             rebuttalContent.innerHTML = data.html || '<div class="text-muted">No results.</div>';
-            if (rebuttalCount) rebuttalCount.textContent = (data.count != null ? data.count : '—') + ' match' + (data.count === 1 ? '' : 'es');
+            if (rebuttalCount) rebuttalCount.textContent =
+                (data.count != null ? data.count : '—') + ' match' + (data.count === 1 ? '' : 'es');
 
-            // Wire up copy buttons inside the generated HTML
             rebuttalContent.querySelectorAll('[data-copy-text]').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const txt = btn.getAttribute('data-copy-text') || '';
@@ -836,13 +1019,13 @@ document.addEventListener('DOMContentLoaded', function() {
     async function logActivity(action) {
         try {
             const flags = {
-                smalltalk: !!toggleSmall.checked,
-                micro_offer: !!toggleOffer.checked
+                smalltalk: !!(toggleSmall && toggleSmall.checked),
+                micro_offer: !!(toggleOffer && toggleOffer.checked)
             };
             const form = new URLSearchParams({
                 action: action,
                 script_type: (scriptTypeEl ? scriptTypeEl.value : 'voicemail'),
-                tone_used: lastToneUsed || (toneSelectEl.value || 'auto'),
+                tone_used: lastToneUsed || (toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto'),
                 contact_id: CONTACT_ID,
                 client_id: CLIENT_ID,
                 job_id: jobSelectEl && jobSelectEl.value ? jobSelectEl.value : ''
@@ -866,18 +1049,16 @@ document.addEventListener('DOMContentLoaded', function() {
         const toneVal    = toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto';
 
         const params = new URLSearchParams({
-            // legacy
             script_type: scriptTypeVal,
             tone: toneVal,
-            // expected by renderer/print
             script_type_slug: scriptTypeVal,
             tone_mode: toneVal,
             touch_number: stageVal,
             delivery_type: scriptTypeVal,
             contact_id: CONTACT_ID,
             client_id: CLIENT_ID,
-            include_smalltalk: toggleSmall.checked ? '1' : '0',
-            include_micro_offer: toggleOffer.checked ? '1' : '0',
+            include_smalltalk: toggleSmall && toggleSmall.checked ? '1' : '0',
+            include_micro_offer: toggleOffer && toggleOffer.checked ? '1' : '0',
             cadence_type: cadenceVal,
             print: '1',
             _ts: String(Date.now())
@@ -888,7 +1069,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return 'print_script.php?' + params.toString();
     }
 
-    // Event bindings (Scripts)
+    // Event bindings
     if (scriptTypeEl) scriptTypeEl.addEventListener('change', () => { renderScript(); fetchRebuttals(); });
     if (jobSelectEl)  jobSelectEl.addEventListener('change', renderScript);
     if (toneSelectEl) toneSelectEl.addEventListener('change', renderScript);
@@ -903,13 +1084,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 const cap = val.charAt(0).toUpperCase() + val.slice(1);
                 cadenceBadge.textContent = 'Cadence: ' + cap;
             }
-            renderScript(); // instant preview
+            renderScript();
             const form = document.getElementById('formOutreach');
             if (form) form.submit();
         });
     }
 
-    // Event bindings (Rebuttals)
     if (rebuttalSearch) {
         rebuttalSearch.addEventListener('input', () => {
             clearTimeout(rebuttalDebounce);
@@ -942,7 +1122,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Initial render + initial rebuttals load
+    // Initial load
     rebuildStageOptions('<?= h($currentCadence) ?>');
     const initialStage = '<?= (int)$defaultStage ?>';
     if (stageSelectEl && initialStage && CADENCE_LABELS['<?= h($currentCadence) ?>'] && CADENCE_LABELS['<?= h($currentCadence) ?>'][initialStage]) {
@@ -954,12 +1134,13 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <?php
-// ---- Merge data for potential email compose or other UI bits ----
 $recipientData = [
     'first_name'   => $contact['first_name'] ?? '',
     'last_name'    => $contact['last_name']  ?? '',
     'full_name'    => trim(($contact['first_name'] ?? '') . ' ' . ($contact['last_name'] ?? '')),
-    'company_name' => $client['name'] ?? ($contact['company'] ?? ''), // prefer linked client name
+    'company_name' => (is_array($client) && isset($client['name']))
+        ? $client['name']
+        : ($contact['company'] ?? ''),
     'job_title'    => $contact['title'] ?? '',
 ];
 
@@ -975,7 +1156,6 @@ $mergeData = array_merge($recipientData, $userData, [
 ?>
 
 <script>
-// Expose merge context (unchanged, in case other components use it)
 window.ComposeEmail = window.ComposeEmail || {};
 window.ComposeEmail.userData = <?= json_encode($userData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
 window.ComposeEmail.recipientData = <?= json_encode($recipientData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;

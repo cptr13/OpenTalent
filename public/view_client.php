@@ -102,6 +102,37 @@ if (!$client) {
 
 $error = '';
 
+// ---- Handle primary contact selection / clear ----
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['primary_contact_id'])) {
+    $newPrimaryId = (int)$_POST['primary_contact_id'];
+
+    try {
+        if ($newPrimaryId === 0) {
+            // Clear primary contact
+            $update = $pdo->prepare("UPDATE clients SET primary_contact_id = NULL WHERE id = ? LIMIT 1");
+            $update->execute([(int)$client_id]);
+            header("Location: view_client.php?id=" . (int)$client_id . "&msg=" . urlencode('Primary contact cleared.'));
+            exit;
+        } else {
+            // Verify the contact actually belongs to this client
+            $check = $pdo->prepare("SELECT id FROM contacts WHERE id = ? AND client_id = ? LIMIT 1");
+            $check->execute([$newPrimaryId, (int)$client_id]);
+            $validContactId = $check->fetchColumn();
+
+            if ($validContactId) {
+                $update = $pdo->prepare("UPDATE clients SET primary_contact_id = ? WHERE id = ? LIMIT 1");
+                $update->execute([(int)$validContactId, (int)$client_id]);
+                header("Location: view_client.php?id=" . (int)$client_id . "&msg=" . urlencode('Primary contact updated.'));
+                exit;
+            } else {
+                $error = "Selected contact is not associated with this client.";
+            }
+        }
+    } catch (Exception $e) {
+        $error = "Failed to update primary contact.";
+    }
+}
+
 // Save note
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['note'])) {
     $note = trim($_POST['note']);
@@ -140,7 +171,7 @@ $stmt = $pdo->prepare("SELECT id, first_name, last_name, title, email, contact_s
 $stmt->execute([(int)$client_id]);
 $contacts = $stmt->fetchAll();
 
-// NEW: Candidate↔Job associations for this client with per-association status
+// Candidate↔Job associations for this client with per-association status
 $stmt = $pdo->prepare("
     SELECT 
         a.id            AS association_id,
@@ -196,13 +227,14 @@ $docCategories = [
 
     <div class="row g-4 mb-4">
         <div class="col-md-6 d-flex flex-column">
-            <div class="card h-100">
+            <div class="card h-100 client-card" data-card-id="company_info">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>Company Info</span>
                     <a href="edit_client.php?id=<?= (int)$client['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
                 </div>
                 <div class="card-body">
                     <p><strong>Industry:</strong> <?= h($client['industry']) ?></p>
+                    <p><strong>Company Size:</strong> <?= h($client['company_size'] ?? '') ?></p>
                     <p><strong>Phone:</strong> <?= h($client['phone'] ?? '') ?></p>
                     <p>
                         <strong>Website:</strong>
@@ -210,11 +242,17 @@ $docCategories = [
                             <a href="<?= h($client['url']) ?>" target="_blank" rel="noopener"><?= h($client['url']) ?></a>
                         <?php endif; ?>
                     </p>
+                    <p>
+                        <strong>LinkedIn:</strong>
+                        <?php if (!empty($client['linkedin'])): ?>
+                            <a href="<?= h($client['linkedin']) ?>" target="_blank" rel="noopener"><?= h($client['linkedin']) ?></a>
+                        <?php endif; ?>
+                    </p>
                     <p><strong>Location:</strong> <?= h($client['location']) ?></p>
                 </div>
             </div>
 
-            <div class="card mt-4">
+            <div class="card mt-4 client-card" data-card-id="account_details">
                 <div class="card-header">Account Details</div>
                 <div class="card-body">
                     <form method="POST" action="update_client_status.php" class="row g-2 align-items-center mb-3">
@@ -227,6 +265,7 @@ $docCategories = [
                                 <option value="Lead" <?= ($client['status'] ?? '') === 'Lead' ? 'selected' : '' ?>>Lead</option>
                                 <option value="Prospect" <?= ($client['status'] ?? '') === 'Prospect' ? 'selected' : '' ?>>Prospect</option>
                                 <option value="Customer" <?= ($client['status'] ?? '') === 'Customer' ? 'selected' : '' ?>>Customer</option>
+                                <option value="Not a fit" <?= ($client['status'] ?? '') === 'Not a fit' ? 'selected' : '' ?>>Not a fit</option>
                             </select>
                         </div>
                         <div class="col-auto">
@@ -240,19 +279,22 @@ $docCategories = [
         </div>
 
         <div class="col-md-6 d-flex flex-column">
-            <div class="card h-100">
+            <div class="card h-100 client-card" data-card-id="about">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>About</span>
                     <a href="edit_client.php?id=<?= (int)$client['id'] ?>" class="btn btn-sm btn-outline-secondary">Edit</a>
                 </div>
-                <div class="card-body overflow-auto" style="max-height: 340px;">
+                <!-- UPDATED: resizable About body -->
+                <div class="card-body overflow-auto about-body">
                     <p><?= nl2br(h($client['about'])) ?></p>
                 </div>
             </div>
 
             <?php if (!empty($primary_contact)): ?>
-                <div class="card mt-4">
-                    <div class="card-header">Primary Contact</div>
+                <div class="card mt-4 client-card" data-card-id="primary_contact">
+                    <div class="card-header">
+                        <span>Primary Contact</span>
+                    </div>
                     <div class="card-body">
                         <h5>
                             <a href="view_contact.php?id=<?= (int)$primary_contact['id'] ?>" class="text-decoration-none">
@@ -277,8 +319,9 @@ $docCategories = [
         'Associated Candidates' => ['items' => $candidate_associations, 'url' => "assign.php?client_id=".(int)$client['id'], 'label' => '+ Associate Candidate', 'view' => 'candidate_assoc'],
     ];
     foreach ($sections as $title => $data):
+        $cardId = 'section_' . preg_replace('/[^a-z0-9]+/i', '_', strtolower($title));
     ?>
-        <div class="card mb-4">
+        <div class="card mb-4 client-card" data-card-id="<?= h($cardId) ?>">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><?= h($title) ?></span>
                 <a href="<?= h($data['url']) ?>" class="btn btn-sm btn-outline-secondary"><?= h($data['label']) ?></a>
@@ -289,6 +332,11 @@ $docCategories = [
                 <?php else: ?>
                     <ul class="list-group">
                         <?php foreach ($data['items'] as $item): ?>
+                            <?php
+                                $isPrimary = ($data['view'] === 'contact'
+                                    && !empty($client['primary_contact_id'])
+                                    && (int)$client['primary_contact_id'] === (int)($item['id'] ?? 0));
+                            ?>
                             <li class="list-group-item d-flex justify-content-between align-items-center">
                                 <div class="text-truncate">
                                     <?php if ($data['view'] === 'candidate_assoc'): ?>
@@ -304,6 +352,9 @@ $docCategories = [
                                         <a href="view_<?= h($data['view']) ?>.php?id=<?= (int)$item['id'] ?>">
                                             <strong><?= h(label_item($item)) ?></strong>
                                         </a>
+                                        <?php if ($data['view'] === 'contact' && $isPrimary): ?>
+                                            <span class="badge bg-primary ms-2">Primary Contact</span>
+                                        <?php endif; ?>
                                         <?php if ($data['view'] === 'contact' && !empty($item['title'])): ?>
                                             <span class="text-muted ms-1">— <?= h($item['title']) ?></span>
                                         <?php elseif (!empty($item['title'])): ?>
@@ -315,6 +366,19 @@ $docCategories = [
                                 <div class="text-nowrap">
                                     <?php if ($data['view'] === 'contact'): ?>
                                         <?= contact_status_badge($item['contact_status'] ?? null, 'sm') ?>
+                                        <form method="POST" action="view_client.php?id=<?= (int)$client['id'] ?>" class="d-inline ms-2">
+                                            <?php if ($isPrimary): ?>
+                                                <input type="hidden" name="primary_contact_id" value="0">
+                                                <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                                    Clear Primary
+                                                </button>
+                                            <?php else: ?>
+                                                <input type="hidden" name="primary_contact_id" value="<?= (int)$item['id'] ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-primary">
+                                                    Set Primary
+                                                </button>
+                                            <?php endif; ?>
+                                        </form>
                                     <?php elseif ($data['view'] === 'candidate_assoc'): ?>
                                         <?= contact_status_badge($item['assoc_status'] ?? null, 'sm') ?>
                                     <?php else: ?>
@@ -336,7 +400,7 @@ $docCategories = [
     <?php endforeach; ?>
 
     <!-- Attachments Card -->
-    <div class="card mb-4">
+    <div class="card mb-4 client-card" data-card-id="attachments">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span>Client Attachments</span>
         </div>
@@ -369,7 +433,7 @@ $docCategories = [
                                     $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
                                     $icon = file_icon($ext);
                                 ?>
-                                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <li class="list-group-item d-flex justify-content-between	align-items-center">
                                         <span class="text-truncate" style="max-width: 70%;">
                                             <?= $icon ?> <?= h($f) ?>
                                             <span class="text-muted ms-2 small">(<?= h($size) ?>)</span>
@@ -390,7 +454,7 @@ $docCategories = [
         </div>
     </div>
 
-    <div class="card mb-5">
+    <div class="card mb-5 client-card" data-card-id="notes">
         <div class="card-header">Notes</div>
         <div class="card-body">
             <form method="POST" class="mb-3">
@@ -432,5 +496,247 @@ $docCategories = [
         </div>
     </div>
 </div>
+
+<style>
+    /* Minimize / maximize */
+    .client-card {
+        cursor: grab;
+    }
+    .client-card .card-header {
+        position: relative;
+        padding-right: 2rem; /* room for toggle */
+    }
+    .client-card .card-toggle-btn {
+        position: absolute;
+        top: 50%;
+        right: .5rem;
+        transform: translateY(-50%);
+        border: none;
+        background: transparent;
+        padding: 0;
+        font-size: 1rem;
+        line-height: 1;
+        cursor: pointer;
+        color: #666;
+    }
+    .client-card .card-toggle-btn:hover {
+        color: #000;
+    }
+    .client-card.card-collapsed > .card-body,
+    .client-card.card-collapsed > .list-group,
+    .client-card.card-collapsed > .card-footer {
+        display: none !important;
+    }
+
+    /* Drag styles */
+    .client-card.dragging {
+        opacity: 0.6;
+        cursor: grabbing;
+    }
+    .client-card-dropzone {
+        border: 2px dashed #0d6efd;
+        border-radius: .5rem;
+        height: 12px;
+        margin: 4px 0;
+    }
+
+    /* Resizable About card body */
+    .client-card[data-card-id="about"] .about-body {
+        min-height: 150px;
+        max-height: 800px;
+        height: 340px;      /* default */
+        resize: vertical;   /* draggable bottom-right corner */
+        overflow: auto;
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const CLIENT_ID = <?= (int)$client_id ?>;
+    const ORDER_KEY_PREFIX = 'client_card_order_' + CLIENT_ID + '_';
+    const STATE_KEY = 'client_card_state_' + CLIENT_ID;
+
+    const allCards = Array.from(document.querySelectorAll('.client-card'));
+    if (!allCards.length) return;
+
+    // ---- State helpers ----
+    function loadOrder(groupKey) {
+        try {
+            const raw = localStorage.getItem(groupKey);
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+    function saveOrder(groupKey, ids) {
+        try {
+            localStorage.setItem(groupKey, JSON.stringify(ids));
+        } catch (e) {}
+    }
+
+    function loadState() {
+        try {
+            const raw = localStorage.getItem(STATE_KEY);
+            return raw ? JSON.parse(raw) : {};
+        } catch (e) {
+            return {};
+        }
+    }
+    function saveState(map) {
+        try {
+            localStorage.setItem(STATE_KEY, JSON.stringify(map));
+        } catch (e) {}
+    }
+
+    const collapseState = loadState();
+
+    // ---- Group cards by parent (so each column/section reorders independently) ----
+    const parentMap = new Map();
+    allCards.forEach(card => {
+        const parent = card.parentElement;
+        if (!parent) return;
+        if (!parentMap.has(parent)) parentMap.set(parent, []);
+        parentMap.get(parent).push(card);
+    });
+
+    let groupIndex = 0;
+
+    parentMap.forEach((cards, parent) => {
+        const groupKey = ORDER_KEY_PREFIX + groupIndex;
+
+        // Apply saved order for this group
+        (function applySavedOrder() {
+            const saved = loadOrder(groupKey);
+            if (!saved || !saved.length) return;
+
+            const map = {};
+            cards.forEach(card => {
+                const id = card.getAttribute('data-card-id');
+                if (id) map[id] = card;
+            });
+
+            saved.forEach(id => {
+                if (map[id]) {
+                    parent.appendChild(map[id]);
+                }
+            });
+        })();
+
+        // Drag & drop for this group
+        let dragCard = null;
+        let dropZone = null;
+
+        function createDropZone() {
+            const dz = document.createElement('div');
+            dz.className = 'client-card-dropzone';
+            return dz;
+        }
+
+        function clearDropZone() {
+            if (dropZone && dropZone.parentElement) {
+                dropZone.parentElement.removeChild(dropZone);
+            }
+            dropZone = null;
+        }
+
+        cards.forEach(card => {
+            card.setAttribute('draggable', 'true');
+
+            card.addEventListener('dragstart', function (e) {
+                dragCard = card;
+                card.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+            });
+
+            card.addEventListener('dragend', function () {
+                card.classList.remove('dragging');
+                dragCard = null;
+                clearDropZone();
+
+                // Save new order for this group
+                const order = Array.from(parent.querySelectorAll('.client-card'))
+                    .map(c => c.getAttribute('data-card-id'))
+                    .filter(Boolean);
+                saveOrder(groupKey, order);
+            });
+
+            card.addEventListener('dragover', function (e) {
+                if (!dragCard || dragCard === card) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+
+                const rect = card.getBoundingClientRect();
+                const midpoint = rect.top + rect.height / 2;
+                const before = e.clientY < midpoint;
+
+                if (!dropZone) {
+                    dropZone = createDropZone();
+                }
+
+                if (before) {
+                    parent.insertBefore(dropZone, card);
+                } else {
+                    if (card.nextSibling) {
+                        parent.insertBefore(dropZone, card.nextSibling);
+                    } else {
+                        parent.appendChild(dropZone);
+                    }
+                }
+            });
+
+            card.addEventListener('drop', function (e) {
+                e.preventDefault();
+                if (!dragCard || !dropZone) return;
+                parent.insertBefore(dragCard, dropZone);
+                clearDropZone();
+            });
+        });
+
+        parent.addEventListener('dragover', function (e) {
+            if (!dragCard) return;
+            e.preventDefault();
+        });
+        parent.addEventListener('drop', function (e) {
+            if (!dragCard) return;
+            e.preventDefault();
+            clearDropZone();
+        });
+
+        groupIndex++;
+    });
+
+    // ---- Minimize / maximize buttons + apply saved collapsed state ----
+    allCards.forEach(card => {
+        const id = card.getAttribute('data-card-id') || '';
+        const header = card.querySelector('.card-header');
+        if (!header) return;
+
+        // Apply saved state
+        if (id && collapseState[id] === true) {
+            card.classList.add('card-collapsed');
+        }
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'card-toggle-btn';
+        btn.setAttribute('aria-label', 'Toggle card');
+        btn.textContent = card.classList.contains('card-collapsed') ? '+' : '−';
+
+        btn.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            card.classList.toggle('card-collapsed');
+            const collapsed = card.classList.contains('card-collapsed');
+            btn.textContent = collapsed ? '+' : '−';
+
+            if (id) {
+                collapseState[id] = collapsed;
+                saveState(collapseState);
+            }
+        });
+
+        header.appendChild(btn);
+    });
+});
+</script>
 
 <?php require_once __DIR__ . '/../includes/footer.php'; ?>
