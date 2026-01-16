@@ -90,11 +90,8 @@ $currentContactStatus = $contact['contact_status'] ?? '';
 // Grab outreach stage for the Scripts panel context
 $defaultStage = isset($contact['outreach_stage']) && (int)$contact['outreach_stage'] > 0 ? (int)$contact['outreach_stage'] : 1;
 
-// ---- Cadence Type (persisted) ----
-$currentCadence = strtolower((string)($contact['outreach_cadence'] ?? 'voicemail'));
-if (!in_array($currentCadence, ['voicemail','mixed'], true)) {
-    $currentCadence = 'voicemail';
-}
+// ---- Unified Cadence Only ----
+$currentCadence = 'unified';
 
 // ---- Address + Region (display only) ----
 $addrStreet  = trim((string)($contact['address_street']  ?? ''));
@@ -131,64 +128,48 @@ try {
 
 /**
  * Build cadence labels from centralized cadence_lookup() when available.
- * Falls back to the known voicemail labels if not present.
- * Returns array like: ['voicemail' => [1 => 'Touch 1 – ...', ...], 'mixed' => [...]]
+ * Falls back to the unified labels if not present.
+ * Returns array like: ['unified' => [1 => 'Touch 1 – ...', ...]]
  */
 function build_cadence_labels(bool $haveCadenceLookup): array
 {
-    $fallbackVoicemail = [
-        1  => 'Touch 1 – Voicemail #1',
-        2  => 'Touch 2 – Voicemail #2',
-        3  => 'Touch 3 – Voicemail #3',
-        4  => 'Touch 4 – Voicemail #4',
-        5  => 'Touch 5 – Voicemail #5',
-        6  => 'Touch 6 – Voicemail #6',
-        7  => 'Touch 7 – Voicemail #7',
-        8  => 'Touch 8 – Voicemail #8',
-        9  => 'Touch 9 – Voicemail #9',
-        10 => 'Touch 10 – Voicemail #10',
-        11 => 'Touch 11 – Voicemail #11',
-        12 => 'Touch 12 – Voicemail #12 (Final)',
+    $fallbackUnified = [
+        1  => 'Touch 1 – Call',
+        2  => 'Touch 2 – Email / Call (No Email)',
+        3  => 'Touch 3 – Call',
+        4  => 'Touch 4 – LinkedIn Connection',
+        5  => 'Touch 5 – Call',
+        6  => 'Touch 6 – Email / Call (No Email)',
+        7  => 'Touch 7 – Call',
+        8  => 'Touch 8 – LinkedIn / Email (Fallback)',
+        9  => 'Touch 9 – Call',
+        10 => 'Touch 10 – Email / Call (No Email)',
+        11 => 'Touch 11 – Call',
+        12 => 'Touch 12 – Close-the-Loop Email',
     ];
 
     $labels = [
-        'voicemail' => $fallbackVoicemail,
-        'mixed'     => [
-            1  => 'Touch 1 – Mixed #1',
-            2  => 'Touch 2 – Mixed #2',
-            3  => 'Touch 3 – Mixed #3',
-            4  => 'Touch 4 – Mixed #4',
-            5  => 'Touch 5 – Mixed #5',
-            6  => 'Touch 6 – Mixed #6',
-            7  => 'Touch 7 – Mixed #7',
-            8  => 'Touch 8 – Mixed #8',
-            9  => 'Touch 9 – Mixed #9',
-            10 => 'Touch 10 – Mixed #10',
-            11 => 'Touch 11 – Mixed #11',
-            12 => 'Touch 12 – Mixed #12 (Final)',
-        ],
+        'unified' => $fallbackUnified,
     ];
 
     if (!$haveCadenceLookup) {
         return $labels;
     }
 
-    $types = ['voicemail','mixed'];
-    foreach ($types as $type) {
-        $built = [];
-        for ($i = 1; $i <= 50; $i++) {
-            $meta = cadence_lookup($i, $type);
-            if (!is_array($meta) || empty($meta['label'])) {
-                break;
-            }
-            $built[$i] = (string)$meta['label'];
-            if (array_key_exists('delay_bd', $meta) && (int)$meta['delay_bd'] === 0) {
-                break;
-            }
+    $built = [];
+    for ($i = 1; $i <= 50; $i++) {
+        $meta = cadence_lookup($i, 'unified');
+        if (!is_array($meta) || empty($meta['label'])) {
+            break;
         }
-        if (!empty($built)) {
-            $labels[$type] = $built;
+        $built[$i] = (string)$meta['label'];
+        if (array_key_exists('delay_bd', $meta) && (int)$meta['delay_bd'] === 0) {
+            break;
         }
+    }
+
+    if (!empty($built)) {
+        $labels['unified'] = $built;
     }
 
     return $labels;
@@ -305,17 +286,12 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>Outreach Status</span>
-                    <span class="badge bg-info-subtle text-dark border">Cadence: <?= h(ucfirst($currentCadence)) ?></span>
+                    <span class="badge bg-info-subtle text-dark border">Cadence: Unified</span>
                 </div>
                 <div class="card-body">
                     <form method="POST" action="update_outreach_stage.php" class="mb-2" id="formOutreach">
                         <input type="hidden" name="id" value="<?= (int)$contact['id'] ?>">
-
-                        <label class="mb-1"><strong>Cadence Type:</strong></label>
-                        <select name="cadence_type" id="cadence_type" class="form-select form-select-sm mb-3">
-                            <option value="voicemail" <?= $currentCadence === 'voicemail' ? 'selected' : '' ?>>Voicemail (Phone-centric)</option>
-                            <option value="mixed" <?= $currentCadence === 'mixed' ? 'selected' : '' ?>>Mixed (Phone + Other)</option>
-                        </select>
+                        <input type="hidden" name="cadence_type" value="unified">
 
                         <label class="mb-1"><strong>Stage:</strong></label>
                         <select name="outreach_stage" id="outreach_stage" class="form-select form-select-sm mt-1 mb-2" onchange="confirmStageChange(this.form)">
@@ -326,7 +302,7 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                             <?php endforeach; ?>
                         </select>
                         <div class="form-text">
-                            Cadence: 2 calls/week × 3 weeks → ~1.5 calls/week × 2 weeks → 1 call/week × 3 weeks.
+                            Unified 12-touch cadence (~22 business days) with calls, email, and LinkedIn.
                         </div>
                     </form>
 
@@ -356,6 +332,7 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                         <div class="input-group input-group-sm" style="width: auto;">
                             <label class="input-group-text" for="scriptType">Type</label>
                             <select id="scriptType" class="form-select">
+                                <option value="pipeline">Pipeline (Current Touch)</option>
                                 <option value="cold_call">Cold Call</option>
                                 <option value="voicemail">Voicemail</option>
                             </select>
@@ -393,15 +370,15 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                         </div>
 
                         <span class="badge text-bg-light" id="toneBadge">Tone: Auto</span>
-                        <span class="badge text-bg-secondary" id="cadenceBadge">Cadence: <?= h(ucfirst($currentCadence)) ?></span>
+                        <span class="badge text-bg-secondary" id="cadenceBadge">Cadence: Unified</span>
                     </div>
                 </div>
                 <div class="card-body">
                     <div id="scriptError" class="alert alert-danger d-none mb-3"></div>
 
                     <div id="stageLine" class="mb-2 small text-muted"
-                         data-base="Stage: Touch <?= (int)$defaultStage ?> • Cadence: <?= h(ucfirst($currentCadence)) ?><?php if ($client): ?> • Company: <?= h($client['name']) ?><?php endif; ?>">
-                        Stage: Touch <?= (int)$defaultStage ?> • Cadence: <?= h(ucfirst($currentCadence)) ?><?php if ($client): ?> • Company: <?= h($client['name']) ?><?php endif; ?>
+                         data-base="Stage: Touch <?= (int)$defaultStage ?> • Cadence: Unified<?php if ($client): ?> • Company: <?= h($client['name']) ?><?php endif; ?>">
+                        Stage: Touch <?= (int)$defaultStage ?> • Cadence: Unified<?php if ($client): ?> • Company: <?= h($client['name']) ?><?php endif; ?>
                     </div>
 
                     <div id="contextBadges" class="mb-2"></div>
@@ -640,8 +617,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const stageLineEl    = document.getElementById('stageLine');
     const badgesEl       = document.getElementById('contextBadges');
 
-    const cadenceSel     = document.getElementById('cadence_type');
-    const cadenceBadge   = document.getElementById('cadenceBadge');
     const stageSelectEl  = document.getElementById('outreach_stage');
 
     const rebuttalContent = document.getElementById('rebuttalsContent');
@@ -653,7 +628,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const CONTACT_ID = '<?= (int)$contact['id'] ?>';
     const CLIENT_ID  = '<?= (int)($contact['client_id'] ?? 0) ?>';
 
-    const CADENCE_LABELS = <?= json_encode($cadenceLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+    const CADENCE_TYPE = 'unified';
+    const CADENCE_LABELS = <?= json_encode($cadenceLabels['unified'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 
     let lastToneUsed = null;
     let rebuttalDebounce = null;
@@ -855,8 +831,8 @@ document.addEventListener('DOMContentLoaded', function() {
         stageLineEl.textContent = base + extra;
     }
 
-    function rebuildStageOptions(cadenceType) {
-        const labels = CADENCE_LABELS[cadenceType] || {};
+    function rebuildStageOptions() {
+        const labels = CADENCE_LABELS || {};
         const currentValue = stageSelectEl ? stageSelectEl.value : '';
         if (!stageSelectEl) return;
 
@@ -877,16 +853,34 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    function inferDeliveryType(scriptTypeVal, stageVal) {
+        const st = String(scriptTypeVal || '').toLowerCase();
+        const tn = parseInt(stageVal, 10) || 1;
+
+        if (st === 'voicemail') return 'voicemail';
+        if (st === 'cold_call') return 'live';
+
+        // Pipeline: only some touches are voicemail, otherwise treat as live.
+        // Touch 1/5/9 => voicemail; the rest => live (good enough for email/linkedin templates too)
+        if (st === 'pipeline') {
+            return ([1,5,9].includes(tn)) ? 'voicemail' : 'live';
+        }
+
+        // Safe default
+        return 'live';
+    }
+
     async function renderScript() {
         if (!outputEl || !stageLineEl) return;
 
         errorBox.classList.add('d-none');
         errorBox.textContent = '';
 
-        const cadenceVal = cadenceSel ? cadenceSel.value : '<?= h($currentCadence) ?>';
-        const stageVal   = stageSelectEl && stageSelectEl.value ? stageSelectEl.value : '<?= (int)$defaultStage ?>';
-        const scriptTypeVal = scriptTypeEl ? scriptTypeEl.value : 'voicemail';
-        const toneVal    = toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto';
+        const stageVal      = stageSelectEl && stageSelectEl.value ? stageSelectEl.value : '<?= (int)$defaultStage ?>';
+        const scriptTypeVal = scriptTypeEl ? scriptTypeEl.value : 'pipeline';
+        const toneVal       = toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto';
+
+        const deliveryType  = inferDeliveryType(scriptTypeVal, stageVal);
 
         const params = new URLSearchParams({
             script_type: scriptTypeVal,
@@ -894,12 +888,12 @@ document.addEventListener('DOMContentLoaded', function() {
             script_type_slug: scriptTypeVal,
             tone_mode: toneVal,
             touch_number: stageVal,
-            delivery_type: scriptTypeVal,
+            delivery_type: deliveryType,
             contact_id: CONTACT_ID,
             client_id: CLIENT_ID,
             include_smalltalk: toggleSmall && toggleSmall.checked ? '1' : '0',
             include_micro_offer: toggleOffer && toggleOffer.checked ? '1' : '0',
-            cadence_type: cadenceVal,
+            cadence_type: CADENCE_TYPE,
             _ts: String(Date.now())
         });
 
@@ -942,11 +936,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             updateContextUI(data.context || {});
 
-            if (cadenceBadge && cadenceVal) {
-                const cap = cadenceVal.charAt(0).toUpperCase() + cadenceVal.slice(1);
-                cadenceBadge.textContent = 'Cadence: ' + cap;
-            }
-
             logActivity('render');
 
         } catch (e) {
@@ -971,7 +960,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const tone = rebuttalToneEl ? rebuttalToneEl.value : 'all';
 
         const params = new URLSearchParams({
-            script_type: scriptTypeEl ? scriptTypeEl.value : 'cold_call',
+            // Rebuttals are for LIVE CALLS. Pipeline includes non-call touches, so keep this stable.
+            script_type: 'cold_call',
             q: q,
             tone: tone,
             _ts: String(Date.now())
@@ -1022,9 +1012,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 smalltalk: !!(toggleSmall && toggleSmall.checked),
                 micro_offer: !!(toggleOffer && toggleOffer.checked)
             };
+            const currentScriptType = (scriptTypeEl ? scriptTypeEl.value : 'pipeline');
+
             const form = new URLSearchParams({
                 action: action,
-                script_type: (scriptTypeEl ? scriptTypeEl.value : 'voicemail'),
+                script_type: currentScriptType,
                 tone_used: lastToneUsed || (toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto'),
                 contact_id: CONTACT_ID,
                 client_id: CLIENT_ID,
@@ -1043,10 +1035,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function buildPrintUrl() {
-        const cadenceVal = cadenceSel ? cadenceSel.value : '<?= h($currentCadence) ?>';
-        const stageVal   = stageSelectEl && stageSelectEl.value ? stageSelectEl.value : '<?= (int)$defaultStage ?>';
-        const scriptTypeVal = scriptTypeEl ? scriptTypeEl.value : 'voicemail';
-        const toneVal    = toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto';
+        const stageVal      = stageSelectEl && stageSelectEl.value ? stageSelectEl.value : '<?= (int)$defaultStage ?>';
+        const scriptTypeVal = scriptTypeEl ? scriptTypeEl.value : 'pipeline';
+        const toneVal       = toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto';
+
+        const deliveryType  = inferDeliveryType(scriptTypeVal, stageVal);
 
         const params = new URLSearchParams({
             script_type: scriptTypeVal,
@@ -1054,12 +1047,12 @@ document.addEventListener('DOMContentLoaded', function() {
             script_type_slug: scriptTypeVal,
             tone_mode: toneVal,
             touch_number: stageVal,
-            delivery_type: scriptTypeVal,
+            delivery_type: deliveryType,
             contact_id: CONTACT_ID,
             client_id: CLIENT_ID,
             include_smalltalk: toggleSmall && toggleSmall.checked ? '1' : '0',
             include_micro_offer: toggleOffer && toggleOffer.checked ? '1' : '0',
-            cadence_type: cadenceVal,
+            cadence_type: CADENCE_TYPE,
             print: '1',
             _ts: String(Date.now())
         });
@@ -1075,20 +1068,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (toneSelectEl) toneSelectEl.addEventListener('change', renderScript);
     if (toggleSmall)  toggleSmall.addEventListener('change', renderScript);
     if (toggleOffer)  toggleOffer.addEventListener('change', renderScript);
-
-    if (cadenceSel) {
-        cadenceSel.addEventListener('change', () => {
-            const val = cadenceSel.value || 'voicemail';
-            rebuildStageOptions(val);
-            if (cadenceBadge) {
-                const cap = val.charAt(0).toUpperCase() + val.slice(1);
-                cadenceBadge.textContent = 'Cadence: ' + cap;
-            }
-            renderScript();
-            const form = document.getElementById('formOutreach');
-            if (form) form.submit();
-        });
-    }
 
     if (rebuttalSearch) {
         rebuttalSearch.addEventListener('input', () => {
@@ -1123,11 +1102,17 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Initial load
-    rebuildStageOptions('<?= h($currentCadence) ?>');
+    rebuildStageOptions();
     const initialStage = '<?= (int)$defaultStage ?>';
-    if (stageSelectEl && initialStage && CADENCE_LABELS['<?= h($currentCadence) ?>'] && CADENCE_LABELS['<?= h($currentCadence) ?>'][initialStage]) {
+    if (stageSelectEl && initialStage && CADENCE_LABELS && CADENCE_LABELS[initialStage]) {
         stageSelectEl.value = initialStage;
     }
+
+    // Default script type to Pipeline so the panel matches the cadence by default.
+    if (scriptTypeEl) {
+        scriptTypeEl.value = 'pipeline';
+    }
+
     renderScript();
     fetchRebuttals();
 });

@@ -14,6 +14,11 @@ if (file_exists(__DIR__ . '/geo_region.php')) {
     require_once __DIR__ . '/geo_region.php';
 }
 
+// Optional cadence helper (safe if absent)
+if (file_exists(__DIR__ . '/cadence.php')) {
+    require_once __DIR__ . '/cadence.php';
+}
+
 //
 // -------------------------------
 // Public API
@@ -54,6 +59,7 @@ function render_script(array $ctx): array {
             'warnings' => ['script_type_missing_generic_used']
         ];
     }
+    $scriptType = strtolower($scriptType);
 
     $contactId   = isset($ctx['contact_id']) ? (int)$ctx['contact_id'] : null;
     $clientId    = isset($ctx['client_id']) ? (int)$ctx['client_id'] : null;
@@ -73,13 +79,34 @@ function render_script(array $ctx): array {
 
     // 3) Determine cadence + touch (UI may omit them; infer from contact row)
     $cadenceFromCtx = isset($ctx['cadence_type']) ? strtolower((string)$ctx['cadence_type']) : null;
-    if ($cadenceFromCtx !== null && !in_array($cadenceFromCtx, ['voicemail','mixed'], true)) {
-        $cadenceFromCtx = 'voicemail';
+
+    // IMPORTANT:
+    // - Historically: cadence was only voicemail|mixed
+    // - Now: unified exists, and pipeline needs channel resolution.
+    // We will treat cadence_type as "unified" if the UI sends it.
+    $allowedCadences = ['voicemail','mixed','unified'];
+    if ($cadenceFromCtx !== null && !in_array($cadenceFromCtx, $allowedCadences, true)) {
+        $cadenceFromCtx = null;
     }
-    $cadenceType = $cadenceFromCtx
-        ?? (isset($vars['outreach_cadence']) && in_array(strtolower((string)$vars['outreach_cadence']), ['voicemail','mixed'], true)
-                ? strtolower((string)$vars['outreach_cadence'])
-                : 'voicemail');
+
+    $savedCad = null;
+    if (isset($vars['outreach_cadence'])) {
+        $savedCad = strtolower((string)$vars['outreach_cadence']);
+        if (!in_array($savedCad, ['voicemail','mixed'], true)) {
+            $savedCad = null;
+        }
+    }
+
+    // Effective cadence:
+    // - If ctx specifies unified, honor it.
+    // - Else preserve legacy behavior (mixed normalized to voicemail).
+    $cadenceTypeRaw = $cadenceFromCtx ?? $savedCad ?? 'voicemail';
+
+    // Normalize for legacy logic, but keep raw for debug
+    $cadenceType = $cadenceTypeRaw;
+    if ($cadenceTypeRaw === 'mixed') {
+        $cadenceType = 'voicemail';
+    }
 
     $touchFromCtx = isset($ctx['touch_number']) ? (int)$ctx['touch_number'] : null;
     $touchNumber  = $touchFromCtx && $touchFromCtx > 0
@@ -89,20 +116,62 @@ function render_script(array $ctx): array {
             : 1);
 
     // Ensure cadence + touch are in the context for templates and for tone rules
-    $vars['cadence_type']        = $cadenceType;
+    $vars['cadence_type']        = $cadenceType;          // effective cadence used for logic/templates
+    $vars['cadence_type_raw']    = $cadenceTypeRaw;       // original (voicemail|mixed|unified)
     $vars['touch_number']        = $touchNumber;
     $vars['attempt_count_total'] = max(1, (int)$touchNumber); // tone reacts to later touches
 
-    // Optional: expose a channel if rules define it (e.g., 'phone' or 'email')
-    if (function_exists('script_channel_for')) {
+    // Prefer centralized cadence metadata (labels/channels) if available.
+    // For pipeline: this is the primary source of truth.
+    if (function_exists('cadence_lookup')) {
         try {
-            $channel = script_channel_for($scriptType, $cadenceType, $touchNumber, $vars);
-            if (is_string($channel) && $channel !== '') {
-                $vars['channel'] = $channel;
+            // FIX: pipeline must always use unified cadence metadata
+            $cadenceKey = ($scriptType === 'pipeline')
+                ? 'unified'
+                : (($cadenceTypeRaw === 'unified') ? 'unified' : $cadenceType);
+
+            $meta = cadence_lookup($touchNumber, $cadenceKey);
+
+            if (is_array($meta)) {
+                if (!empty($meta['label'])) {
+                    $vars['touch_label'] = (string)$meta['label'];
+                }
+                if (!empty($meta['channel'])) {
+                    // expected: call | call_vm | email | linkedin
+                    $vars['channel'] = (string)$meta['channel'];
+                }
             }
         } catch (Throwable $e) {
-            // Non-fatal
+            // non-fatal
         }
+    }
+
+    // If cadence_lookup didn't provide channel (or cadence.php missing),
+    // apply a fallback mapping ONLY for the unified pipeline use case.
+    if (empty($vars['channel']) && ($cadenceTypeRaw === 'unified' || $scriptType === 'pipeline')) {
+        $vars['channel'] = unified_channel_fallback($touchNumber);
+        if (empty($vars['touch_label'])) {
+            $vars['touch_label'] = unified_label_fallback($touchNumber);
+        }
+    }
+
+    // Back-compat: if someone expects script_channel_for(), call it correctly.
+    // NOTE: your script_rules.php defines script_channel_for(string $cadence, int $touch): string
+    // The previous code passed totally wrong args and it would never work.
+    if (empty($vars['channel']) && function_exists('script_channel_for')) {
+        try {
+            $ch = script_channel_for($cadenceType, $touchNumber);
+            if (is_string($ch) && $ch !== '') {
+                $vars['channel'] = $ch; // 'email'|'linkedin'|'call'
+            }
+        } catch (Throwable $e) {
+            // non-fatal
+        }
+    }
+
+    // Normalize channel value to one of: call | call_vm | email | linkedin
+    if (!empty($vars['channel'])) {
+        $vars['channel'] = normalize_channel((string)$vars['channel']);
     }
 
     // ----------------------------
@@ -120,7 +189,7 @@ function render_script(array $ctx): array {
             $fallbackPhraseTone = 'consultative';
             $toneMap = build_tone_map($pdo, $fallbackPhraseTone, $vars);
             if (!$toneMap) {
-                $toneMap = []; // handled a bit later
+                $toneMap = [];
             }
         }
     } else {
@@ -139,8 +208,9 @@ function render_script(array $ctx): array {
         }
     }
 
-    // 5) Resolve template variant (cadence + touch) OR fall back to DB template
-    $variant = resolve_template_variant($pdo, $scriptType, $cadenceType, $touchNumber, $vars, $toneUsed);
+    // 5) Resolve template variant (touch-driven) OR fall back to DB template
+    // Pipeline requires correct content_kind selection (email/linkedin/voicemail/live_script).
+    $variant = resolve_template_variant($pdo, $scriptType, $cadenceTypeRaw, $touchNumber, $vars, $toneUsed, $ctx);
     $templateName = null;
     $body         = null;
 
@@ -149,6 +219,7 @@ function render_script(array $ctx): array {
         $body         = (string)$variant['body'];
     } else {
         // Existing behavior: use the active template by type slug (single body)
+        // (Pipeline generally should NOT land here unless you intentionally store legacy templates for 'pipeline'.)
         $tpl = get_active_template_by_type_slug($pdo, $scriptType);
         if ($tpl) {
             $templateName = $tpl['name'] . ' (v' . (int)$tpl['version'] . ')';
@@ -198,7 +269,8 @@ function render_script(array $ctx): array {
     $rendered = mustache_render($body, $data);
 
     // 9.1) Post-process for delivery type (Voicemail vs Live Call), and drop timing lines.
-    $delivery = detect_delivery_type($ctx, $scriptType);
+    // For pipeline, delivery should follow channel.
+    $delivery = detect_delivery_type($ctx, $scriptType, $vars);
     $rendered = post_process_delivery_text($rendered, $delivery);
 
     // 10) Post-cleanup & line collapsing for missing role/days
@@ -255,48 +327,81 @@ function pick_tone(?string $manual, ?string $stageSlug, ?int $touch, ?string $pe
  * Tries a code-defined variant (script_rules.php) first, then DB lookups in script_templates_unified.
  * Return shape: ['name' => string, 'body' => string]
  */
-function resolve_template_variant(PDO $pdo, string $scriptType, string $cadenceType, int $touchNumber, array $vars, ?string $toneUsed = null): ?array
+function resolve_template_variant(PDO $pdo, string $scriptType, string $cadenceTypeRaw, int $touchNumber, array $vars, ?string $toneUsed = null, array $ctx = []): ?array
 {
     // 1) Code-defined variants (lets us iterate without DB churn)
     if (function_exists('script_template_for')) {
         try {
-            // Back-compat shim: if script_template_for supports a 5th param (tone override), use it.
             $res = null;
             try {
                 $rf = new ReflectionFunction('script_template_for');
                 $argc = $rf->getNumberOfParameters();
                 if ($argc >= 5) {
-                    // New signature: (type, cadence, touch, vars, toneOverride)
-                    $res = script_template_for($scriptType, $cadenceType, $touchNumber, $vars, $toneUsed);
+                    $res = script_template_for($scriptType, $cadenceTypeRaw, $touchNumber, $vars, $toneUsed);
                 } else {
-                    // Old signature: (type, cadence, touch, vars)
-                    $res = script_template_for($scriptType, $cadenceType, $touchNumber, $vars);
+                    $res = script_template_for($scriptType, $cadenceTypeRaw, $touchNumber, $vars);
                 }
             } catch (Throwable $e) {
-                // If Reflection fails for any reason, fall back to 4-arg call
-                $res = script_template_for($scriptType, $cadenceType, $touchNumber, $vars);
+                $res = script_template_for($scriptType, $cadenceTypeRaw, $touchNumber, $vars);
             }
 
             if (is_array($res) && isset($res['body'])) {
-                $name = $res['name'] ?? ($scriptType . ':' . $cadenceType . ':T' . $touchNumber);
+                $name = $res['name'] ?? ($scriptType . ':' . $cadenceTypeRaw . ':T' . $touchNumber);
                 return ['name' => $name, 'body' => (string)$res['body']];
             }
         } catch (Throwable $e) {
-            // If a template function explodes, do not kill render; just fall back
+            // fall back
         }
     }
 
     // 2) DB variants (script_templates_unified)
-    // Derive a delivery "kind" from scriptType (voicemail vs live/call).
-    $delivery = infer_delivery_from_script_type($scriptType);
+    // PIPELINE MUST BE DETERMINISTIC BY TOUCH → CONTENT_KIND (no delivery heuristics).
+    if (strtolower(trim($scriptType)) === 'pipeline') {
+        $tone = $toneUsed ?: 'consultative';
 
-    // Normalize acceptable content_kind values we’ll accept in queries for each delivery
-    $kinds = delivery_to_kind_set($delivery); // e.g. ['voicemail','voicemail_script'] or ['live','live_call','cold_call','live_script']
+        // Canonical mapping (single source of truth).
+        $kind = null;
+        if (function_exists('pipeline_content_kind_for_touch')) {
+            $kind = pipeline_content_kind_for_touch($touchNumber);
+        } else {
+            // Hard fallback (should not happen if script_rules.php is loaded)
+            $t = max(1, (int)$touchNumber);
+            if ($t === 4) $kind = 'cadence_linkedin';
+            elseif (in_array($t, [3,7,11], true)) $kind = 'live_script';
+            elseif (in_array($t, [1,5,9], true))  $kind = 'voicemail';
+            else $kind = 'cadence_email';
+        }
 
-    // Preferred tone is whatever we ended up using (dropdown wins if set)
+        // Strict: status active, exact touch, exact kind, slug prefix must match pipeline templates.
+        $row = find_pipeline_unified_variant($pdo, $kind, $touchNumber, $tone);
+        if ($row) {
+            return [
+                'name' => build_pipeline_name($row),
+                'body' => (string)$row['body'],
+            ];
+        }
+
+        // Tone fallback allowed (your rule): pick any tone if the requested tone row is missing.
+        $row = find_pipeline_unified_variant_any_tone($pdo, $kind, $touchNumber);
+        if ($row) {
+            return [
+                'name' => build_pipeline_name($row),
+                'body' => (string)$row['body'],
+            ];
+        }
+
+        // If truly missing, allow caller to fall through to legacy/generic.
+        return null;
+    }
+
+    // Non-pipeline behavior: delivery inference + flexible kind sets
+    $delivery = infer_delivery_from_script_type_and_context($scriptType, $vars, $ctx);
+
+    // Normalize acceptable content_kind values we’ll accept in queries for each delivery/kind
+    $kinds = delivery_to_kind_set($delivery);
+
     $tone = $toneUsed ?: 'consultative';
 
-    // Attempt 1: strict match on kind + touch_number + tone_default + active
     $row = find_unified_variant($pdo, $kinds, $touchNumber, $tone);
     if ($row) {
         return [
@@ -305,16 +410,14 @@ function resolve_template_variant(PDO $pdo, string $scriptType, string $cadenceT
         ];
     }
 
-    // Attempt 2: same kind + touch_number, but any tone (prefer consultative if present)
     $row = find_unified_variant_any_tone($pdo, $kinds, $touchNumber);
     if ($row) {
         return [
-            'name' => build_unified_name($row, $delivery, $touchNumber, $row['tone_default'] ?? 'consultative'),
+            'name' => build_unified_name($row, $delivery, $touchNumber, (string)($row['tone_default'] ?? 'consultative')),
             'body' => (string)$row['body'],
         ];
     }
 
-    // Attempt 3: same kind + tone, but without touch_number (NULL or 0 as generic template)
     $row = find_unified_variant_no_touch($pdo, $kinds, $tone);
     if ($row) {
         return [
@@ -323,30 +426,100 @@ function resolve_template_variant(PDO $pdo, string $scriptType, string $cadenceT
         ];
     }
 
-    // Attempt 4: same kind only (no touch, any tone), pick most recently updated
     $row = find_unified_variant_kind_only($pdo, $kinds);
     if ($row) {
         return [
-            'name' => build_unified_name($row, $delivery, $touchNumber, $row['tone_default'] ?? 'consultative'),
+            'name' => build_unified_name($row, $delivery, $touchNumber, (string)($row['tone_default'] ?? 'consultative')),
             'body' => (string)$row['body'],
         ];
     }
 
-    // Nothing in unified; allow caller to fall back to legacy single-body template
     return null;
 }
 
-/** Pick delivery (voicemail|live) from scriptType heuristics */
-function infer_delivery_from_script_type(string $scriptType): string {
-    $s = strtolower($scriptType);
+/**
+ * PIPELINE DB lookup: strict match for canonical pipeline templates.
+ * Enforces template_slug prefix to avoid pulling unrelated unified templates.
+ */
+function find_pipeline_unified_variant(PDO $pdo, string $kind, int $touchNumber, string $tone) {
+    $sql = "
+        SELECT id, template_slug, content_kind, touch_number, tone_default, body, status, updated_at
+        FROM script_templates_unified
+        WHERE status = 'active'
+          AND template_slug LIKE 'pipeline_step%'
+          AND content_kind = ?
+          AND touch_number = ?
+          AND LOWER(tone_default) = LOWER(?)
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+    ";
+    return db_first_row($pdo, $sql, [$kind, $touchNumber, $tone]);
+}
+
+/** PIPELINE DB lookup: same touch/kind, any tone (prefer consultative if tied) */
+function find_pipeline_unified_variant_any_tone(PDO $pdo, string $kind, int $touchNumber) {
+    $sql = "
+        SELECT id, template_slug, content_kind, touch_number, tone_default, body, status, updated_at
+        FROM script_templates_unified
+        WHERE status = 'active'
+          AND template_slug LIKE 'pipeline_step%'
+          AND content_kind = ?
+          AND touch_number = ?
+        ORDER BY (LOWER(tone_default) = 'consultative') DESC, updated_at DESC, id DESC
+        LIMIT 1
+    ";
+    return db_first_row($pdo, $sql, [$kind, $touchNumber]);
+}
+
+/** Build readable name for pipeline templates (uses actual row identifiers) */
+function build_pipeline_name(array $row): string {
+    $slug = (string)($row['template_slug'] ?? 'pipeline');
+    $kind = (string)($row['content_kind'] ?? 'unknown_kind');
+    $tn   = (string)($row['touch_number'] ?? '?');
+    $tone = (string)($row['tone_default'] ?? '?');
+    $id   = (string)($row['id'] ?? '?');
+    return "{$slug} ({$kind} T{$tn} tone={$tone} #{$id})";
+}
+
+/**
+ * Infer delivery/kind:
+ * - voicemail -> voicemail
+ * - cold_call/live_call/call -> live
+ * - pipeline -> based on vars['channel'] (email/linkedin/call_vm/call)
+ */
+function infer_delivery_from_script_type_and_context(string $scriptType, array $vars, array $ctx): string {
+    $s = strtolower(trim($scriptType));
+
+    if ($s === 'pipeline') {
+        $ch = $vars['channel'] ?? ($ctx['channel'] ?? null);
+        $ch = $ch ? normalize_channel((string)$ch) : null;
+
+        if ($ch === 'email') return 'email';
+        if ($ch === 'linkedin') return 'linkedin';
+        if ($ch === 'call_vm') return 'voicemail';
+        if ($ch === 'call') return 'live';
+
+        // If pipeline but no channel, treat as live to avoid VM markers
+        return 'live';
+    }
+
     if ($s === 'voicemail' || strpos($s, 'voice') !== false || $s === 'vm') return 'voicemail';
-    // everything else treats as "live" (cold_call, live_call, call, etc.)
+
+    // everything else treats as live (cold_call, live_call, call, etc.)
     return 'live';
 }
 
-/** Map delivery to acceptable content_kind values (handles different labels you might have used). */
+/** Map delivery/kind to acceptable content_kind values (handles different labels you might have used). */
 function delivery_to_kind_set(string $delivery): array {
-    if ($delivery === 'voicemail') {
+    $d = strtolower($delivery);
+
+    if ($d === 'email') {
+        return ['email', 'email_script', 'email_touch'];
+    }
+    if ($d === 'linkedin') {
+        return ['linkedin', 'linkedin_script', 'li', 'dm'];
+    }
+    if ($d === 'voicemail') {
         return ['voicemail', 'voicemail_script', 'vm'];
     }
     // live/call family
@@ -435,24 +608,66 @@ function db_first_row(PDO $pdo, string $sql, array $params) {
 }
 
 /**
+ * Normalize channel values into: call | call_vm | email | linkedin
+ */
+function normalize_channel(string $ch): string {
+    $c = strtolower(trim($ch));
+    if ($c === 'call_vm' || $c === 'vm' || $c === 'voicemail' || $c === 'callvoicemail') return 'call_vm';
+    if ($c === 'call' || $c === 'phone' || $c === 'cold_call' || $c === 'live') return 'call';
+    if ($c === 'linkedin' || $c === 'li' || $c === 'dm') return 'linkedin';
+    if ($c === 'email' || $c === 'mail') return 'email';
+    return $c;
+}
+
+/**
+ * Fallback unified channel mapping (only if cadence_lookup is absent).
+ * This should mirror your unified labels and expected cadence behavior.
+ */
+function unified_channel_fallback(int $touch): string {
+    $t = max(1, (int)$touch);
+
+    // Based on your displayed unified labels:
+    // 1 Call
+    // 2 Email / Call (No Email)
+    // 3 Call
+    // 4 LinkedIn Connection
+    // 5 Call
+    // 6 Email / Call (No Email)
+    // 7 Call
+    // 8 LinkedIn / Email (Fallback)
+    // 9 Call
+    // 10 Email / Call (No Email)
+    // 11 Call
+    // 12 Close-the-Loop Email
+    if (in_array($t, [2,6,10,12], true)) return 'email';
+    if (in_array($t, [4,8], true)) return 'linkedin';
+
+    // Calls: decide VM vs live.
+    // If you want touch 1/5/9 to be voicemail and 3/7/11 to be live, do that here.
+    if (in_array($t, [1,5,9], true)) return 'call_vm';
+    return 'call';
+}
+
+/**
+ * Fallback labels if cadence_lookup missing (minimal).
+ */
+function unified_label_fallback(int $touch): string {
+    $t = max(1, (int)$touch);
+    return "Touch {$t}";
+}
+
+/**
  * Load facts from DB and compute derived fields.
- *
- * Adds:
- *  - location (best-effort: contact addr → client.location → job.location → candidate city/state)
- *  - region (derived via infer_region_from_parts or infer_region_from_location)
- *  - placeholder parity keys for template convenience
- *
- * Candidate fallback (if no contact data):
- *   contact_first  <- candidates.first_name (else "there")
- *   contact_title  <- candidates.current_job (if present)
- *   contact_function <- derived from title
+ * (unchanged below this line, except we keep your existing behavior)
  */
 function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candidateId = null): array {
     global $pdo;
 
-    // Seed with nulls so tokens are visible when missing
+    if (session_status() === PHP_SESSION_NONE) {
+        @session_start();
+    }
+
     $vars = [
-        // Person (contact-first semantics)
         'contact_first'        => 'there',
         'first_name'           => null,
         'last_name'            => null,
@@ -465,29 +680,25 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
         'department'           => null,
         'linkedin'             => null,
 
-        // Also expose contact address fields directly for templates
         'address_street'       => null,
         'address_city'         => null,
         'address_state'        => null,
         'address_zip'          => null,
         'address_country'      => null,
 
-        // Company (client)
-        'company'              => null,      // legacy alias
-        'company_name'         => null,      // preferred
+        'company'              => null,
+        'company_name'         => null,
         'industry'             => null,
-        'client_location'      => null,      // raw clients.location
-        'location'             => null,      // computed best-effort
-        'region'               => null,      // derived from location
+        'client_location'      => null,
+        'location'             => null,
+        'region'               => null,
 
-        // Job bits
         'top_open_role'        => null,
         'job_location'         => null,
         'days_open_top_role'   => null,
 
-        // Control & snippets
         'attempt_count_total'  => 1,
-        'outreach_stage'       => null,      // raw numeric from contacts
+        'outreach_stage'       => null,
         'outreach_stage_slug'  => 'open',
         'outreach_stage_num'   => null,
         'outreach_cadence'     => null,
@@ -496,7 +707,9 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
         'pain_point_snippet'   => null,
         'value_prop_snippet'   => null,
 
-        // Your info (session/system)
+        'touch_label'          => null,
+        'channel'              => null,
+
         'your_name'            => null,
         'user_first'           => null,
         'your_agency'          => null,
@@ -506,17 +719,15 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
         'calendar_link'        => null,
     ];
 
-    // Current user info
     if (!empty($_SESSION['user'])) {
         $full = trim((string)($_SESSION['user']['full_name'] ?? '')) ?: null;
         $vars['your_name'] = $full;
-        $vars['user_first'] = $full ? preg_replace('/\s+.*/', '', $full) : null; // first token
+        $vars['user_first'] = $full ? preg_replace('/\s+.*/', '', $full) : null;
         $vars['my_email']  = $_SESSION['user']['email'] ?? null;
         $vars['my_phone']  = $_SESSION['user']['phone'] ?? null;
-        $vars['user_phone'] = $vars['my_phone']; // alias used in scripts
+        $vars['user_phone'] = $vars['my_phone'];
     }
 
-    // Agency / company name from system_settings (single row)
     try {
         $stmt = $pdo->query("SELECT company_name FROM system_settings LIMIT 1");
         if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -528,12 +739,10 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
 
     $contactFound = false;
 
-    // Holders for parts so we can prefer infer_region_from_parts
     $contactCity = $contactState = $contactCountry = null;
     $candCity = $candState = $candCountry = null;
     $street = $city = $state = $zip = $country = null;
 
-    // Contact
     if ($contactId) {
         $stmt = $pdo->prepare("
             SELECT c.*, cl.name AS client_name, cl.industry AS client_industry, cl.location AS client_location
@@ -546,7 +755,6 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
         if ($c = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $contactFound = true;
 
-            // Person
             $vars['first_name']      = trim((string)($c['first_name'] ?? '')) ?: null;
             $vars['last_name']       = trim((string)($c['last_name'] ?? '')) ?: null;
             $vars['full_name']       = trim((string)($c['full_name'] ?? '')) ?: null;
@@ -558,27 +766,22 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
             $vars['department']      = trim((string)($c['department'] ?? '')) ?: null;
             $vars['linkedin']        = trim((string)($c['linkedin'] ?? '')) ?: null;
 
-            // Greeting safety
             $vars['contact_first'] = $vars['first_name'] ?: 'there';
 
-            // Company (client)
             $vars['company_name'] = trim((string)($c['client_name'] ?? '')) ?: $vars['company_name'];
-            $vars['company']      = $vars['company_name']; // legacy alias
+            $vars['company']      = $vars['company_name'];
             $vars['industry']     = trim((string)($c['client_industry'] ?? '')) ?: $vars['industry'];
 
-            // Outreach stage mapping (numeric → slug)
             $stageNum = (int)($c['outreach_stage'] ?? 0);
             $vars['outreach_stage']      = $stageNum ?: null;
             $vars['outreach_stage_num']  = $stageNum ?: null;
             $vars['outreach_stage_slug'] = map_outreach_stage_to_slug($stageNum);
 
-            // Optional cadence column on contacts (e.g., 'voicemail' or 'mixed')
             if (array_key_exists('outreach_cadence', $c)) {
                 $cad = strtolower((string)$c['outreach_cadence']);
                 $vars['outreach_cadence'] = in_array($cad, ['voicemail','mixed'], true) ? $cad : null;
             }
 
-            // Contact address parts (store parts for region inference AND expose to templates)
             $street  = trim((string)($c['address_street']  ?? ''));
             $city    = trim((string)($c['address_city']    ?? ''));
             $state   = trim((string)($c['address_state']   ?? ''));
@@ -595,16 +798,13 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
             $contactState   = $vars['address_state'];
             $contactCountry = $vars['address_country'];
 
-            // Client.location as fallback later
             $vars['client_location']           = trim((string)($c['client_location'] ?? '')) ?: null;
             $vars['_client_location_fallback'] = $vars['client_location'];
 
-            // Local time placeholder (if you later add tz per-contact, compute here)
             $vars['contact_local_time'] = null;
         }
     }
 
-    // Candidate fallback (only if no contact resolved)
     if (!$contactFound && $candidateId) {
         $stmt = $pdo->prepare("
             SELECT first_name, last_name, current_job, city, state, country
@@ -623,12 +823,10 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
             $vars['title']        = trim((string)($cand['current_job'] ?? '')) ?: null;
             $vars['contact_function'] = derive_function_slug($vars['title']);
 
-            // Candidate location parts
             $candCity    = ($cand['city']    ?? '') !== '' ? trim((string)$cand['city'])    : null;
             $candState   = ($cand['state']   ?? '') !== '' ? trim((string)$cand['state'])   : null;
             $candCountry = ($cand['country'] ?? '') !== '' ? trim((string)$cand['country']) : null;
 
-            // Candidate location fallback string
             $candLocParts = [];
             foreach ([$candCity,$candState,$candCountry] as $fldVal) {
                 if (!empty($fldVal)) $candLocParts[] = $fldVal;
@@ -637,20 +835,18 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
         }
     }
 
-    // Client (explicit param can override names/industry and add location fallback)
     if ($clientId) {
         $stmt = $pdo->prepare("SELECT name, industry, location FROM clients WHERE id = :id LIMIT 1");
         $stmt->execute([':id' => $clientId]);
         if ($cl = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $vars['company_name'] = trim((string)($cl['name'] ?? '')) ?: $vars['company_name'];
-            $vars['company']      = $vars['company_name']; // legacy alias
+            $vars['company']      = $vars['company_name'];
             $vars['industry']     = trim((string)($cl['industry'] ?? '')) ?: $vars['industry'];
             $vars['client_location'] = trim((string)($cl['location'] ?? '')) ?: $vars['client_location'];
             $vars['_client_location_param'] = $vars['client_location'];
         }
     }
 
-    // Job (title, created_at for days open, plus job.location if present)
     if ($jobId) {
         $stmt = $pdo->prepare("SELECT title, created_at, location FROM jobs WHERE id = :id LIMIT 1");
         $stmt->execute([':id' => $jobId]);
@@ -662,13 +858,6 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
         }
     }
 
-    // -------- Location assembly (best-effort) --------
-    // Priority:
-    // 1) Contact address (street, city, state, zip, country) if present
-    // 2) Client.location (from contact join)
-    // 3) Client.location (from explicit client param)
-    // 4) Job.location
-    // 5) Candidate city/state/country
     $location = null;
     if (isset($street) || isset($contactCity) || isset($contactState) || isset($zip) || isset($contactCountry)) {
         $parts = [];
@@ -694,7 +883,6 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
     }
     $vars['location'] = $location ?: null;
 
-    // -------- Region derivation (prefer parts, else free-form) --------
     $region = null;
     try {
         if (function_exists('infer_region_from_parts') &&
@@ -721,17 +909,14 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
     }
     $vars['region'] = $region ?: null;
 
-    // Compute local part of day if local time exists
     if (!empty($vars['contact_local_time'])) {
         $vars['local_part_of_day'] = derive_part_of_day($vars['contact_local_time']);
     }
 
-    // Persona derivation from title/department if still empty
     if (empty($vars['contact_function'])) {
         $vars['contact_function'] = derive_function_slug($vars['title']);
     }
 
-    // Snippets: trim/limit
     $vars['pain_point_snippet'] = safe_ellipsis($vars['pain_point_snippet'], 120);
     $vars['value_prop_snippet'] = safe_ellipsis($vars['value_prop_snippet'], 120);
 
@@ -803,7 +988,6 @@ function compute_days_open(?string $createdAt): ?int {
 }
 
 function derive_part_of_day(string $hhmm_ampm): ?string {
-    // Expect like "10:12 AM"
     if (!preg_match('/(\d{1,2}):\d{2}\s*(AM|PM)/i', $hhmm_ampm, $m)) return null;
     $h = (int)$m[1];
     $ampm = strtoupper($m[2]);
@@ -842,13 +1026,6 @@ function safe_ellipsis(?string $str, int $maxLen): ?string {
     return mb_substr($s, 0, $maxLen - 1) . '…';
 }
 
-/**
- * Basic mustache-like renderer with token-on-empty policy:
- * - Supports dotted keys (e.g., "tone.greeting")
- * - Supports simple pipes: {{var|title}}, {{var|upper}}, {{var|lower}}, {{var|ellipsis120}}, {{var|approx}}
- * - If a key is missing or resolves to an empty string, we return the literal token "{{key}}"
- *   (pipes are ignored in that case; you’ll still see "{{key}}").
- */
 function mustache_render(string $tpl, array $vars): string {
     $map = flatten_vars_for_render($vars);
 
@@ -856,7 +1033,6 @@ function mustache_render(string $tpl, array $vars): string {
         $key  = $m[1];
         $pipe = isset($m[2]) ? ltrim($m[2], '|') : null;
 
-        // If key not present OR value empty → show the literal token
         if (!array_key_exists($key, $map) || (string)$map[$key] === '') {
             return '{{' . $key . '}}';
         }
@@ -893,9 +1069,6 @@ function apply_pipe(string $val, string $pipe): string {
     return $val;
 }
 
-/**
- * Flatten array (including dotted keys already present).
- */
 function flatten_vars_for_render(array $vars): array {
     $out = [];
     $it = new RecursiveIteratorIterator(new RecursiveArrayIterator($vars));
@@ -907,7 +1080,6 @@ function flatten_vars_for_render(array $vars): array {
         $path = implode('.', $keys);
         $out[$path] = (string)$leaf;
     }
-    // Also copy top-level scalar keys as-is.
     foreach ($vars as $k => $v) {
         if (is_scalar($v) || $v === null) {
             $out[$k] = (string)$v;
@@ -916,9 +1088,6 @@ function flatten_vars_for_render(array $vars): array {
     return $out;
 }
 
-/**
- * Cleanup whitespace and blank lines for display/print.
- */
 function cleanup_text(string $txt): string {
     $txt = str_replace(["\r\n", "\r"], "\n", $txt);
     $lines = array_map(function($l){ return rtrim($l, " \t"); }, explode("\n", $txt));
@@ -936,50 +1105,48 @@ function cleanup_text(string $txt): string {
 }
 
 /**
- * Detect delivery type from context and scriptType.
- * Returns 'voicemail' or 'live'.
+ * Detect delivery type.
+ * Returns 'voicemail' or 'live'. For pipeline email/linkedin, we treat as 'live' for post-processing
+ * (meaning: strip VM-only parts).
  */
-function detect_delivery_type(array $ctx, string $scriptType): string {
+function detect_delivery_type(array $ctx, string $scriptType, array $vars = []): string {
+    $st = strtolower((string)$scriptType);
+
+    if ($st === 'pipeline') {
+        $ch = $vars['channel'] ?? ($ctx['channel'] ?? null);
+        $ch = $ch ? normalize_channel((string)$ch) : null;
+
+        if ($ch === 'call_vm') return 'voicemail';
+        // email/linkedin/call -> treat as live (strip VM-only markers)
+        return 'live';
+    }
+
     $raw = strtolower((string)($ctx['delivery_type'] ?? $scriptType));
-    // Normalize common inputs
     if (strpos($raw, 'voice') !== false || $raw === 'vm') {
         return 'voicemail';
     }
     if (strpos($raw, 'cold') !== false || strpos($raw, 'live') !== false || strpos($raw, 'call') !== false) {
         return 'live';
     }
-    // Fallback: treat unknowns as voicemail (safer to include contact info there)
     return 'voicemail';
 }
 
 /**
  * Post-process the rendered body for delivery type and remove timing lines.
- * - For voicemail: keep VM-only snippets, but strip the "VM-" label.
- * - For live: drop VM-only snippets (lines starting with "VM-" or inline tails " VM-...").
- * - Remove lines that start with the stopwatch emoji (⏱).
  */
 function post_process_delivery_text(string $raw, string $deliveryType): string {
-    // Normalize line endings first
     $raw = str_replace(["\r\n", "\r"], "\n", $raw);
 
-    // Remove timing lines (any line starting with the stopwatch emoji)
     $raw = preg_replace('/^\s*⏱.*$/mu', '', $raw);
 
     if ($deliveryType === 'voicemail') {
-        // Keep the content, but remove the "VM-" label wherever it appears as a marker.
-        // 1) Leading "VM-" at line start
         $raw = preg_replace('/^(\s*)VM-\s*/mu', '$1', $raw);
-        // 2) Inline " VM-" before the voicemail-only tail
         $raw = preg_replace('/\sVM-\s*/m', ' ', $raw);
     } else {
-        // Live/Cold Call: remove VM-only content
-        // 1) Remove entire lines that begin with VM-
         $raw = preg_replace('/^\s*VM-.*$/mu', '', $raw);
-        // 2) Remove inline tails beginning with " VM-" to end-of-line
         $raw = preg_replace('/\sVM-.*$/m', '', $raw);
     }
 
-    // Collapse 3+ blank lines to max 1 blank line
     $raw = preg_replace("/\n{3,}/", "\n\n", $raw);
 
     return trim($raw);

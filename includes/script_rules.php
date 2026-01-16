@@ -91,19 +91,25 @@ function tone_from_title(?string $title): string {
 
 /**
  * Fetch a unified template row by (content_kind, touch_number, tone_default).
- * content_kind: 'voicemail' | 'live_script'
+ *
+ * content_kind values (CURRENT CANONICAL for your unified pipeline):
+ *  - 'live_script'
+ *  - 'voicemail'
+ *  - 'cadence_email'
+ *  - 'cadence_linkedin'
+ *
  * tone_default: 'friendly' | 'consultative' | 'direct'
- * @return array|null ['template_slug','content_kind','touch_number','tone_default','body','version','status']
+ * @return array|null ['template_slug','content_kind','touch_number','tone_default','subject','body','version','status']
  */
 function get_unified_template(PDO $pdo, string $contentKind, int $touchNumber, string $toneSlug): ?array {
     $sql = "
-        SELECT template_slug, content_kind, touch_number, tone_default, body, version, status
+        SELECT template_slug, content_kind, touch_number, tone_default, subject, body, version, status
         FROM script_templates_unified
         WHERE content_kind = :kind
           AND status = 'active'
           AND tone_default = :tone
-          AND (touch_number = :touch OR (touch_number IS NULL AND :touch = 1))
-        ORDER BY touch_number DESC, version DESC, template_slug ASC
+          AND touch_number = :touch
+        ORDER BY version DESC, template_slug ASC
         LIMIT 1
     ";
     $stmt = $pdo->prepare($sql);
@@ -147,10 +153,41 @@ function script_channel_for(string $cadence, int $touch): string {
 }
 
 /* -----------------------------------------------------------
+ * Pipeline routing (CANONICAL)
+ * Pipeline = "show the current touch script" using outreach_stage.
+ * Touch→content_kind mapping follows your authoritative 12-touch cadence:
+ *
+ * Touch  Channel / content_kind
+ * 1      voicemail
+ * 2      cadence_email
+ * 3      live_script
+ * 4      cadence_linkedin
+ * 5      voicemail
+ * 6      cadence_email
+ * 7      live_script
+ * 8      cadence_email (also usable as LinkedIn DM)
+ * 9      voicemail
+ * 10     cadence_email
+ * 11     live_script (“No Voicemail” body allowed)
+ * 12     cadence_email (close-out)
+ * -----------------------------------------------------------
+ */
+function pipeline_content_kind_for_touch(int $touch): string {
+    $t = max(1, (int)$touch);
+
+    if ($t === 4) return 'cadence_linkedin';
+    if ($t === 3 || $t === 7 || $t === 11) return 'live_script';
+    if ($t === 1 || $t === 5 || $t === 9)  return 'voicemail';
+
+    // Touches 2,6,8,10,12 are email-based (touch 8 is dual-use email/DM by your rule)
+    return 'cadence_email';
+}
+
+/* -----------------------------------------------------------
  * Primary: per-touch template variants
  *  - Uses UNIFIED templates
  *  - Tone chosen STRICTLY by contact title unless an override is provided
- *  - Content kind driven by script type (Cold Call → live_script, Voicemail → voicemail)
+ *  - Content kind driven by script type (Cold Call → live_script, Voicemail → voicemail, Pipeline → touch map)
  *  - If not found, return null to let renderer fall back to legacy or generic
  * -----------------------------------------------------------
  */
@@ -160,8 +197,8 @@ function script_channel_for(string $cadence, int $touch): string {
  *   ['name' => string, 'body' => string]  OR  null to allow DB/generic fallback.
  *
  * Inputs:
- *   $type          : 'cold_call' or 'voicemail' (from UI)
- *   $cadence       : 'voicemail' | 'mixed' (not used to choose tone anymore; kept for compatibility)
+ *   $type          : 'cold_call' or 'voicemail' or 'pipeline' (from UI)
+ *   $cadence       : 'voicemail' | 'mixed' (kept for compatibility; Pipeline ignores it)
  *   $touch         : outreach touch number (1..12)
  *   $vars          : render vars; we use $vars['title'] for title→tone fallback
  *   $toneOverride  : OPTIONAL manual tone slug from UI dropdown
@@ -173,11 +210,6 @@ function script_template_for(string $type, string $cadence, int $touch, array $v
 
     $type  = strtolower(trim($type));
     $touch = max(1, (int)$touch);
-
-    // Map script type → unified content_kind
-    //   'cold_call' → 'live_script'
-    //   'voicemail' → 'voicemail'
-    $contentKind = ($type === 'voicemail') ? 'voicemail' : 'live_script';
 
     // Decide tone: override (if valid) → else strict title-based
     $toneSlug = null;
@@ -196,12 +228,25 @@ function script_template_for(string $type, string $cadence, int $touch, array $v
         $toneSlug = tone_from_title($vars['title'] ?? null);
     }
 
+    // Map script type → unified content_kind
+    //   'cold_call' → 'live_script'
+    //   'voicemail' → 'voicemail'
+    //   'pipeline'  → touch-based mapping
+    if ($type === 'pipeline') {
+        $contentKind = pipeline_content_kind_for_touch($touch);
+    } else {
+        $contentKind = ($type === 'voicemail') ? 'voicemail' : 'live_script';
+    }
+
     // Try unified template first
     try {
         $row = get_unified_template($pdo, $contentKind, $touch, $toneSlug);
         if ($row && !empty($row['body'])) {
             $name = (string)($row['template_slug'] ?? ($contentKind . "_t{$touch}_{$toneSlug}"));
-            return ['name' => $name, 'body' => (string)$row['body']];
+            return [
+                'name' => $name,
+                'body' => (string)$row['body']
+            ];
         }
     } catch (Throwable $e) {
         // swallow and let legacy fallback

@@ -1,12 +1,9 @@
 <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
 // ajax/render_script.php
 // AJAX endpoint to render dynamic scripts. Returns strict JSON only.
 
-ini_set('display_errors', 0); // never echo PHP warnings/notices into JSON
+// IMPORTANT: Never echo warnings/notices into JSON
+ini_set('display_errors', 0);
 ini_set('display_startup_errors', 0);
 ini_set('log_errors', 1);
 error_reporting(E_ALL);
@@ -16,7 +13,7 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 
-// Convert ALL PHP warnings/notices/fatals to JSON responses
+// Convert ALL PHP warnings/notices to JSON responses (keeps output valid JSON)
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
     http_response_code(500);
     echo json_encode([
@@ -43,7 +40,7 @@ set_exception_handler(function($ex) {
     exit;
 });
 
-// --- Auth check (no path changes) ---
+// --- Auth check ---
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -53,20 +50,14 @@ if (empty($_SESSION['user'])) {
     exit;
 }
 
-// --- Includes (ajax/ is at project root; keep paths exactly as you had them) ---
+// --- Includes ---
 $databasePath = __DIR__ . '/../config/database.php';
 $rendererPath = __DIR__ . '/../includes/script_renderer.php';
 $rulesPath    = __DIR__ . '/../includes/script_rules.php'; // for tone_from_title()
 
-if (!is_file($databasePath)) {
-    throw new RuntimeException("Missing include: $databasePath");
-}
-if (!is_file($rendererPath)) {
-    throw new RuntimeException("Missing include: $rendererPath");
-}
-if (!is_file($rulesPath)) {
-    throw new RuntimeException("Missing include: $rulesPath");
-}
+if (!is_file($databasePath)) throw new RuntimeException("Missing include: $databasePath");
+if (!is_file($rendererPath)) throw new RuntimeException("Missing include: $rendererPath");
+if (!is_file($rulesPath))    throw new RuntimeException("Missing include: $rulesPath");
 
 require_once $databasePath;
 require_once $rendererPath;
@@ -88,9 +79,17 @@ if (!function_exists('req_param')) {
     }
 }
 
-/**
- * Validate cadence string against allowed values.
- */
+/** Keep script_type sane (avoid weird junk). */
+if (!function_exists('normalize_script_type')) {
+    function normalize_script_type(?string $s): string {
+        $s = strtolower(trim((string)$s));
+        // allow letters, numbers, underscore only (matches your slugs like cold_call, voicemail, etc.)
+        $s = preg_replace('/[^a-z0-9_]/', '', $s);
+        return $s;
+    }
+}
+
+/** Validate cadence string against allowed values. */
 if (!function_exists('normalize_cadence')) {
     function normalize_cadence(?string $s): ?string {
         if ($s === null) return null;
@@ -112,87 +111,88 @@ if (!function_exists('normalize_tone')) {
 }
 
 try {
-    // ---- Sanitize inputs ----
-    $scriptType  = trim((string)(req_param('script_type') ?? ''));
+    // ---- Inputs ----
+    $scriptTypeRaw = req_param('script_type');
+    $scriptType    = normalize_script_type($scriptTypeRaw);
+
     $contactId   = (($v = req_param('contact_id'))   !== null && $v !== '') ? (int)$v : null;
     $clientId    = (($v = req_param('client_id'))    !== null && $v !== '') ? (int)$v : null;
     $jobId       = (($v = req_param('job_id'))       !== null && $v !== '') ? (int)$v : null;
     $candidateId = (($v = req_param('candidate_id')) !== null && $v !== '') ? (int)$v : null;
 
-    // **Dropdown wins**:
-    // Prefer ?tone= from the UI dropdown; fall back to ?tone_mode= if present; else 'auto'
-    $toneParamRaw = req_param('tone');
-    if ($toneParamRaw === null) {
-        $toneParamRaw = req_param('tone_mode'); // legacy/fallback
+    // Prefer explicit contact over candidate fallback
+    if ($contactId) {
+        $candidateId = null;
     }
-    $tone = normalize_tone($toneParamRaw);
-
-    $includeSmalltalk  = (($v = req_param('include_smalltalk'))   !== null) ? ((int)$v !== 0) : true;
-    $includeMicroOffer = (($v = req_param('include_micro_offer')) !== null) ? ((int)$v !== 0) : true;
-
-    // Optional: explicit cadence type override from UI
-    $cadenceType = normalize_cadence(req_param('cadence_type')); // may be null if not sent
 
     if ($scriptType === '') {
         echo json_encode(['ok' => false, 'message' => 'Missing script_type'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
     }
 
-    // If an explicit contact is chosen, ignore candidate_id (candidate is only a fallback)
-    if ($contactId) {
-        $candidateId = null;
+    // Dropdown wins: tone
+    $toneParamRaw = req_param('tone');
+    if ($toneParamRaw === null) {
+        $toneParamRaw = req_param('tone_mode'); // legacy fallback
     }
+    $toneRequested = normalize_tone($toneParamRaw);
 
-    // Allow explicit touch_number override for preview (e.g., dropdown changed but not saved yet)
+    // Flags
+    $includeSmalltalk  = (($v = req_param('include_smalltalk'))   !== null) ? ((int)$v !== 0) : true;
+    $includeMicroOffer = (($v = req_param('include_micro_offer')) !== null) ? ((int)$v !== 0) : true;
+
+    // Dropdown wins: cadence (may be null if not sent)
+    $cadenceType = normalize_cadence(req_param('cadence_type'));
+
+    // Dropdown wins: touch_number override for preview (may be null if not sent)
     $touchNumber = null;
     if (($tnRaw = req_param('touch_number')) !== null && $tnRaw !== '') {
         $tn = (int)$tnRaw;
         if ($tn > 0) $touchNumber = $tn;
     }
 
-    // If we have a contact, fetch stage, saved cadence, AND title (for tone auto-resolution) in a single query
+    // Delivery type (vm/live) passed through to renderer
+    $delivery = req_param('delivery_type');
+    $delivery = $delivery ? strtolower(trim($delivery)) : null;
+
+    // ---- If contact exists, fetch defaults in ONE query ----
     $row = null;
     if ($contactId) {
         $stmt = $pdo->prepare("SELECT outreach_stage, outreach_cadence, title FROM contacts WHERE id = ? LIMIT 1");
         $stmt->execute([$contactId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
-    // Derive touch number if not explicitly provided
+    // Touch fallback from DB if not explicitly provided
     if ($touchNumber === null) {
-        if ($row && isset($row['outreach_stage'])) {
-            $tn = (int)$row['outreach_stage'];
-            $touchNumber = $tn > 0 ? $tn : 1;
-        } else {
-            $touchNumber = 1; // safe default
-        }
+        $dbStage = $row['outreach_stage'] ?? null;
+        $tn = (int)$dbStage;
+        $touchNumber = ($tn > 0) ? $tn : 1;
     }
 
-    // Resolve cadence type:
-    // Priority: explicit UI override -> saved DB value -> default 'voicemail'
+    // Cadence fallback from DB if not explicitly provided
     if ($cadenceType === null) {
-        $saved = $row['outreach_cadence'] ?? null;
-        $cadenceType = normalize_cadence($saved) ?? 'voicemail';
+        $savedCad = $row['outreach_cadence'] ?? null;
+        $cadenceType = normalize_cadence($savedCad) ?? 'voicemail';
     }
 
-    // ----------------------
-    // Tone auto-resolution (STRICT by contact title)
-    // ----------------------
-    // Only resolve when UI sent 'auto'; otherwise, respect the chosen tone.
-    if ($tone === 'auto') {
-        $contactTitle = $row['title'] ?? null; // may be null; tone_from_title handles null as consultative
+    // ---- Tone resolution ----
+    // Keep the contract: dropdown wins. If UI says auto, resolve it to a REAL tone based on contact title.
+    // (That means renderer will treat it as manual, and will NOT do its own auto inference.)
+    $toneResolved = $toneRequested;
+    if ($toneRequested === 'auto') {
         if (!function_exists('tone_from_title')) {
             throw new RuntimeException('tone_from_title() not found; includes/script_rules.php not loaded.');
         }
-        $tone = tone_from_title($contactTitle); // friendly | consultative | direct
+        $contactTitle = $row['title'] ?? null; // null → tone_from_title should return consultative
+        $toneResolved = tone_from_title($contactTitle);
+        // hard safety
+        if (!in_array($toneResolved, ['friendly','consultative','direct'], true)) {
+            $toneResolved = 'consultative';
+        }
     }
 
-    // ----------------------
-    // Build render context
-    // ----------------------
-    $delivery = req_param('delivery_type');
-    $delivery = $delivery ? strtolower(trim($delivery)) : null;
-
+    // ---- Build context for renderer ----
     $ctx = [
         'script_type_slug'    => $scriptType,
         'contact_id'          => $contactId,
@@ -200,31 +200,28 @@ try {
         'job_id'              => $jobId,
         'candidate_id'        => $candidateId,
 
-        // **Dropdown wins** (with auto resolved just above)
-        'tone_mode'           => $tone,
+        // Send a concrete tone so renderer treats it as final
+        'tone_mode'           => $toneResolved,
 
         'include_smalltalk'   => $includeSmalltalk,
         'include_micro_offer' => $includeMicroOffer,
 
-        // Context for renderer
         'touch_number'        => $touchNumber,
         'cadence_type'        => $cadenceType,
 
-        // Optional: pass delivery_type through if UI sends it (vm/live)
         'delivery_type'       => $delivery,
     ];
 
     // ---- Render ----
     $res = render_script($ctx);
 
-    // Normalize/validate the renderer response to avoid undefined-index fatals
     if (is_string($res)) {
         $res = ['text' => $res];
     } elseif (!is_array($res)) {
         throw new RuntimeException('render_script() returned unexpected type: ' . gettype($res));
     }
 
-    // Small, safe excerpt for UI badges (won't break if context is missing)
+    // Safe excerpt for UI
     $ctxFull = $res['context'] ?? [];
     $context_excerpt = null;
     if (is_array($ctxFull) && $ctxFull) {
@@ -239,26 +236,26 @@ try {
     $out = [
         'ok'               => true,
         'text'             => $res['text']          ?? '',
-        'tone_used'        => $res['tone_used']     ?? $tone, // echo tone the renderer chose; fallback to resolved tone
+        'tone_used'        => $res['tone_used']     ?? $toneResolved,
         'template_name'    => $res['template_name'] ?? null,
         'context'          => $res['context']       ?? null,
         'context_excerpt'  => $context_excerpt,
         'missing'          => $res['missing']       ?? [],
         'warnings'         => $res['warnings']      ?? [],
 
-        // Echo back what we resolved so UI (or logs) can show it
+        // Echo resolved values (for UI/log sanity)
         'touch_number'     => $touchNumber,
         'cadence_type'     => $cadenceType,
 
-        // Debug/verification: what tone value did the endpoint finally use?
-        'tone_param'       => $tone,
+        // Debug: what did UI request vs what did we actually use?
+        'tone_requested'   => $toneRequested,
+        'tone_param'       => $toneResolved,
     ];
 
     echo json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 
 } catch (Throwable $e) {
-    // Any exception becomes a structured JSON error with file/line
     http_response_code(500);
     echo json_encode([
         'ok'      => false,

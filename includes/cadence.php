@@ -4,8 +4,10 @@
  *
  * Centralized cadence definitions and lookup for outreach stage scheduling.
  *
+ * Moving forward there is ONE cadence only: the unified 12-touch integrated cadence.
+ *
  * Public API:
- *   cadence_lookup(int $stage, string $cadenceType = 'voicemail'): array{
+ *   cadence_lookup(int $stage, string $cadenceType = 'unified'): array{
  *       label: string,        // Human-readable stage label
  *       delay_bd: int,        // Business days until NEXT touch (0 = end)
  *       flags: array,         // Optional feature flags (e.g., ['li_connect' => true])
@@ -13,30 +15,32 @@
  *   }
  *
  * Convenience helpers:
- *   cadence_types(): array<string>                    // ['voicemail','mixed']
- *   cadence_touch_count(string $type='voicemail'):int // 12
+ *   cadence_types(): array<string>                    // ['unified']
+ *   cadence_touch_count(string $type='unified'):int   // 12
  *   cadence_stage_title(string $type,int $stage):string
- *   cadence_table(string $type='voicemail'): array<int,array{label:string,delay_bd:int,flags:array,channel:string}>
+ *   cadence_table(string $type='unified'): array<int,array{label:string,delay_bd:int,flags:array,channel:string}>
  */
 
 // ---- Public: list supported cadences ----
 function cadence_types(): array {
-    return ['voicemail', 'mixed'];
+    return ['unified'];
 }
 
-function cadence_touch_count(string $type = 'voicemail'): int {
-    return 12; // both cadences are 12-touch
+function cadence_touch_count(string $type = 'unified'): int {
+    return 12; // unified cadence is 12-touch
 }
 
 /**
  * Primary lookup — returns label + business-day delay + flags + channel.
  */
-function cadence_lookup(int $stage, string $cadenceType = 'voicemail'): array
+function cadence_lookup(int $stage, string $cadenceType = 'unified'): array
 {
     $type = strtolower(trim($cadenceType));
     if (!in_array($type, cadence_types(), true)) {
-        $type = 'voicemail';
+        // Hard cutover: only unified is supported
+        $type = 'unified';
     }
+
     if ($stage < 1)  $stage = 1;
     if ($stage > 12) $stage = 12;
 
@@ -66,99 +70,81 @@ function cadence_stage_title(string $type, int $stage): string {
  * Internal: Build the full table for a cadence type.
  * Keys are 1..12; values include label, delay_bd (business days), flags, and channel.
  */
-function cadence_table(string $type = 'voicemail'): array
+function cadence_table(string $type = 'unified'): array
 {
     $type = strtolower(trim($type));
 
-    // ----- Mixed Cadence (Phone + Other) -----
-    if ($type === 'mixed') {
-        // Alternates between email and LinkedIn, with a call/VM near the end.
-        $labels = [
-            1  => 'Touch 1 – Email #1',
-            2  => 'Touch 2 – LinkedIn #1',
-            3  => 'Touch 3 – Email #2',
-            4  => 'Touch 4 – LinkedIn #2',
-            5  => 'Touch 5 – Email #3',
-            6  => 'Touch 6 – LinkedIn #3',
-            7  => 'Touch 7 – Email #4',
-            8  => 'Touch 8 – LinkedIn #4',
-            9  => 'Touch 9 – Email #5',
-            10 => 'Touch 10 – LinkedIn #5',
-            11 => 'Touch 11 – Call / Voicemail',
-            12 => 'Touch 12 – Breakup Email',
-        ];
-        $delays = [
-            1 => 3,
-            2 => 2,
-            3 => 3,
-            4 => 2,
-            5 => 3,
-            6 => 5,
-            7 => 5,
-            8 => 5,
-            9 => 10,
-            10 => 10,
-            11 => 10,
-            12 => 0,
-        ];
-        $channels = [
-            1=>'email', 2=>'linkedin', 3=>'email', 4=>'linkedin', 5=>'email', 6=>'linkedin',
-            7=>'email', 8=>'linkedin', 9=>'email', 10=>'linkedin', 11=>'call', 12=>'email'
-        ];
-
-        $out = [];
-        for ($i=1; $i<=12; $i++) {
-            $out[$i] = [
-                'label'    => $labels[$i] ?? "Touch {$i}",
-                'delay_bd' => (int)($delays[$i] ?? 0),
-                'flags'    => [],
-                'channel'  => $channels[$i] ?? 'email',
-            ];
-        }
-        return $out;
-    }
-
-    // ----- Voicemail-Only Cadence -----
-    // Rhythm: 2 calls/week × 3 weeks → 1.5 calls/week × 2 weeks → 1 call/week × 3 weeks
+    // ----- Unified 12-Touch Integrated Cadence -----
+    // Absolute day spacing (business days):
+    // Day 0  – Call
+    // Day 1  – Email
+    // Day 2  – Call
+    // Day 4  – LinkedIn connection
+    // Day 5  – Call
+    // Day 7  – Email
+    // Day 9  – Call
+    // Day 12 – LinkedIn (or Email fallback)
+    // Day 14 – Call
+    // Day 17 – Email
+    // Day 20 – Call
+    // Day 22 – Close-the-loop email
+    //
+    // Delays below are business days to NEXT touch (not absolute days).
     $labels = [
-        1  => 'Touch 1 – Voicemail #1',
-        2  => 'Touch 2 – Voicemail #2',
-        3  => 'Touch 3 – Voicemail #3',
-        4  => 'Touch 4 – Voicemail #4',
-        5  => 'Touch 5 – Voicemail #5',
-        6  => 'Touch 6 – Voicemail #6',
-        7  => 'Touch 7 – Voicemail #7',
-        8  => 'Touch 8 – Voicemail #8',
-        9  => 'Touch 9 – Voicemail #9',
-        10 => 'Touch 10 – Voicemail #10',
-        11 => 'Touch 11 – Voicemail #11',
-        12 => 'Touch 12 – Voicemail #12 (Final)',
+        1  => 'Touch 1 – Call',
+        2  => 'Touch 2 – Email / Call (No Email)',
+        3  => 'Touch 3 – Call',
+        4  => 'Touch 4 – LinkedIn Connection',
+        5  => 'Touch 5 – Call',
+        6  => 'Touch 6 – Email / Call (No Email)',
+        7  => 'Touch 7 – Call',
+        8  => 'Touch 8 – LinkedIn / Email (Fallback)',
+        9  => 'Touch 9 – Call',
+        10 => 'Touch 10 – Email / Call (No Email)',
+        11 => 'Touch 11 – Call',
+        12 => 'Touch 12 – Close-the-Loop Email',
     ];
+
     $delays = [
-        1 => 2, // -> T2
-        2 => 3, // -> T3
-        3 => 2, // -> T4
-        4 => 3, // -> T5
-        5 => 2, // -> T6
-        6 => 3, // -> T7
-        7 => 4, // -> T8
-        8 => 3, // -> T9
-        9 => 4, // -> T10
-        10 => 5, // -> T11
-        11 => 5, // -> T12
+        1  => 1, // Day 0  -> Day 1
+        2  => 1, // Day 1  -> Day 2
+        3  => 2, // Day 2  -> Day 4
+        4  => 1, // Day 4  -> Day 5
+        5  => 2, // Day 5  -> Day 7
+        6  => 2, // Day 7  -> Day 9
+        7  => 3, // Day 9  -> Day 12
+        8  => 2, // Day 12 -> Day 14
+        9  => 3, // Day 14 -> Day 17
+        10 => 3, // Day 17 -> Day 20
+        11 => 2, // Day 20 -> Day 22
         12 => 0, // end
     ];
-    $flags = [
-        1 => ['li_connect' => true], // optional LinkedIn connection add-on for Touch 1
+
+    $channels = [
+        1  => 'call',
+        2  => 'email',
+        3  => 'call',
+        4  => 'linkedin',
+        5  => 'call',
+        6  => 'email',
+        7  => 'call',
+        8  => 'linkedin',
+        9  => 'call',
+        10 => 'email',
+        11 => 'call',
+        12 => 'email',
     ];
 
+    // Optional flags kept for future use (none active yet for unified cadence)
+    $flags = [];
+
     $out = [];
-    for ($i=1; $i<=12; $i++) {
+    for ($i = 1; $i <= 12; $i++) {
         $out[$i] = [
             'label'    => $labels[$i] ?? "Touch {$i}",
             'delay_bd' => (int)($delays[$i] ?? 0),
             'flags'    => $flags[$i] ?? [],
-            'channel'  => 'call', // or 'call_vm' if you want finer granularity
+            'channel'  => $channels[$i] ?? 'call',
         ];
     }
     return $out;
