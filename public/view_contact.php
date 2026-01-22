@@ -329,14 +329,7 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                 <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
                     <span>Scripts</span>
                     <div class="d-flex flex-wrap gap-2 align-items-center">
-                        <div class="input-group input-group-sm" style="width: auto;">
-                            <label class="input-group-text" for="scriptType">Type</label>
-                            <select id="scriptType" class="form-select">
-                                <option value="pipeline">Pipeline (Current Touch)</option>
-                                <option value="cold_call">Cold Call</option>
-                                <option value="voicemail">Voicemail</option>
-                            </select>
-                        </div>
+                        <span class="badge text-bg-primary">Pipeline (Current Touch)</span>
 
                         <?php if (!empty($associated_jobs)): ?>
                             <div class="input-group input-group-sm" style="width:auto;">
@@ -358,15 +351,6 @@ if (empty($cadenceLabels[$currentCadence][$defaultStage])) {
                                 <option value="consultative">Consultative</option>
                                 <option value="direct">Direct</option>
                             </select>
-                        </div>
-
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="toggleSmalltalk" checked>
-                            <label class="form-check-label small" for="toggleSmalltalk">Small-talk</label>
-                        </div>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" id="toggleMicroOffer" checked>
-                            <label class="form-check-label small" for="toggleMicroOffer">Micro-offer</label>
                         </div>
 
                         <span class="badge text-bg-light" id="toneBadge">Tone: Auto</span>
@@ -600,11 +584,8 @@ function confirmStageChange(form) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    const scriptTypeEl   = document.getElementById('scriptType');
     const jobSelectEl    = document.getElementById('jobSelect');
     const toneSelectEl   = document.getElementById('toneSelect');
-    const toggleSmall    = document.getElementById('toggleSmalltalk');
-    const toggleOffer    = document.getElementById('toggleMicroOffer');
 
     const outputEl       = document.getElementById('scriptOutput');
     const toneBadge      = document.getElementById('toneBadge');
@@ -853,50 +834,29 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function inferDeliveryType(scriptTypeVal, stageVal) {
-        const st = String(scriptTypeVal || '').toLowerCase();
-        const tn = parseInt(stageVal, 10) || 1;
-
-        if (st === 'voicemail') return 'voicemail';
-        if (st === 'cold_call') return 'live';
-
-        // Pipeline: only some touches are voicemail, otherwise treat as live.
-        // Touch 1/5/9 => voicemail; the rest => live (good enough for email/linkedin templates too)
-        if (st === 'pipeline') {
-            return ([1,5,9].includes(tn)) ? 'voicemail' : 'live';
-        }
-
-        // Safe default
-        return 'live';
-    }
-
     async function renderScript() {
         if (!outputEl || !stageLineEl) return;
 
         errorBox.classList.add('d-none');
         errorBox.textContent = '';
 
-        const stageVal      = stageSelectEl && stageSelectEl.value ? stageSelectEl.value : '<?= (int)$defaultStage ?>';
-        const scriptTypeVal = scriptTypeEl ? scriptTypeEl.value : 'pipeline';
-        const toneVal       = toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto';
+        const stageVal = stageSelectEl && stageSelectEl.value ? stageSelectEl.value : '<?= (int)$defaultStage ?>';
+        const toneVal  = toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto';
 
-        const deliveryType  = inferDeliveryType(scriptTypeVal, stageVal);
-
+        // Canonical-only request: no legacy "type", no microoffer/smalltalk flags, no delivery_type.
+        // TODO: If ../ajax/render_script.php still requires additional legacy params, update that endpoint (not this UI)
+        //       to accept canonical params only: contact_id, touch_number, tone (+ optional context like client_id/job_id).
         const params = new URLSearchParams({
-            script_type: scriptTypeVal,
-            tone: toneVal,
-            script_type_slug: scriptTypeVal,
-            tone_mode: toneVal,
-            touch_number: stageVal,
-            delivery_type: deliveryType,
             contact_id: CONTACT_ID,
-            client_id: CLIENT_ID,
-            include_smalltalk: toggleSmall && toggleSmall.checked ? '1' : '0',
-            include_micro_offer: toggleOffer && toggleOffer.checked ? '1' : '0',
+            touch_number: String(stageVal),
+            tone: String(toneVal),
             cadence_type: CADENCE_TYPE,
             _ts: String(Date.now())
         });
 
+        if (CLIENT_ID && String(CLIENT_ID) !== '0') {
+            params.set('client_id', CLIENT_ID);
+        }
         if (jobSelectEl && jobSelectEl.value) {
             params.set('job_id', jobSelectEl.value);
         }
@@ -936,7 +896,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             updateContextUI(data.context || {});
 
-            logActivity('render');
+            logActivity('render', stageVal);
 
         } catch (e) {
             outputEl.value = '';
@@ -960,7 +920,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const tone = rebuttalToneEl ? rebuttalToneEl.value : 'all';
 
         const params = new URLSearchParams({
-            // Rebuttals are for LIVE CALLS. Pipeline includes non-call touches, so keep this stable.
+            // Rebuttals are for LIVE CALLS.
             script_type: 'cold_call',
             q: q,
             tone: tone,
@@ -1006,23 +966,19 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function logActivity(action) {
+    async function logActivity(action, touchNumber) {
         try {
-            const flags = {
-                smalltalk: !!(toggleSmall && toggleSmall.checked),
-                micro_offer: !!(toggleOffer && toggleOffer.checked)
-            };
-            const currentScriptType = (scriptTypeEl ? scriptTypeEl.value : 'pipeline');
-
             const form = new URLSearchParams({
                 action: action,
-                script_type: currentScriptType,
+                script_type: 'pipeline',
                 tone_used: lastToneUsed || (toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto'),
+                touch_number: String(touchNumber || ''),
                 contact_id: CONTACT_ID,
                 client_id: CLIENT_ID,
                 job_id: jobSelectEl && jobSelectEl.value ? jobSelectEl.value : ''
             });
-            form.append('flags_json', JSON.stringify(flags));
+
+            // No smalltalk/microoffer flags. Those concepts are removed.
             await fetch('../ajax/log_script_activity.php?_ts=' + Date.now(), {
                 method: 'POST',
                 credentials: 'same-origin',
@@ -1035,39 +991,32 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function buildPrintUrl() {
-        const stageVal      = stageSelectEl && stageSelectEl.value ? stageSelectEl.value : '<?= (int)$defaultStage ?>';
-        const scriptTypeVal = scriptTypeEl ? scriptTypeEl.value : 'pipeline';
-        const toneVal       = toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto';
-
-        const deliveryType  = inferDeliveryType(scriptTypeVal, stageVal);
+        const stageVal = stageSelectEl && stageSelectEl.value ? stageSelectEl.value : '<?= (int)$defaultStage ?>';
+        const toneVal  = toneSelectEl ? (toneSelectEl.value || 'auto') : 'auto';
 
         const params = new URLSearchParams({
-            script_type: scriptTypeVal,
-            tone: toneVal,
-            script_type_slug: scriptTypeVal,
-            tone_mode: toneVal,
-            touch_number: stageVal,
-            delivery_type: deliveryType,
             contact_id: CONTACT_ID,
-            client_id: CLIENT_ID,
-            include_smalltalk: toggleSmall && toggleSmall.checked ? '1' : '0',
-            include_micro_offer: toggleOffer && toggleOffer.checked ? '1' : '0',
+            touch_number: String(stageVal),
+            tone: String(toneVal),
             cadence_type: CADENCE_TYPE,
             print: '1',
             _ts: String(Date.now())
         });
+
+        if (CLIENT_ID && String(CLIENT_ID) !== '0') {
+            params.set('client_id', CLIENT_ID);
+        }
         if (jobSelectEl && jobSelectEl.value) {
             params.set('job_id', jobSelectEl.value);
         }
+
         return 'print_script.php?' + params.toString();
     }
 
     // Event bindings
-    if (scriptTypeEl) scriptTypeEl.addEventListener('change', () => { renderScript(); fetchRebuttals(); });
     if (jobSelectEl)  jobSelectEl.addEventListener('change', renderScript);
     if (toneSelectEl) toneSelectEl.addEventListener('change', renderScript);
-    if (toggleSmall)  toggleSmall.addEventListener('change', renderScript);
-    if (toggleOffer)  toggleOffer.addEventListener('change', renderScript);
+    if (stageSelectEl) stageSelectEl.addEventListener('change', renderScript);
 
     if (rebuttalSearch) {
         rebuttalSearch.addEventListener('input', () => {
@@ -1085,7 +1034,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 outputEl.select();
                 document.execCommand('copy');
                 copyBtn.textContent = 'Copied';
-                logActivity('copy');
+                const stageVal = stageSelectEl && stageSelectEl.value ? stageSelectEl.value : '';
+                logActivity('copy', stageVal);
                 setTimeout(() => copyBtn.textContent = 'Copy', 1200);
             } catch (e) {
                 console.error(e);
@@ -1095,7 +1045,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (printBtn) {
         printBtn.addEventListener('click', async () => {
-            logActivity('print');
+            const stageVal = stageSelectEl && stageSelectEl.value ? stageSelectEl.value : '';
+            logActivity('print', stageVal);
             const url = buildPrintUrl();
             window.open(url, '_blank', 'noopener');
         });
@@ -1106,11 +1057,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const initialStage = '<?= (int)$defaultStage ?>';
     if (stageSelectEl && initialStage && CADENCE_LABELS && CADENCE_LABELS[initialStage]) {
         stageSelectEl.value = initialStage;
-    }
-
-    // Default script type to Pipeline so the panel matches the cadence by default.
-    if (scriptTypeEl) {
-        scriptTypeEl.value = 'pipeline';
     }
 
     renderScript();

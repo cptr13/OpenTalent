@@ -1,6 +1,6 @@
 <?php
 // ajax/render_script.php
-// AJAX endpoint to render dynamic scripts. Returns strict JSON only.
+// AJAX endpoint to render CANONICAL pipeline scripts only. Returns strict JSON only.
 
 // IMPORTANT: Never echo warnings/notices into JSON
 ini_set('display_errors', 0);
@@ -79,25 +79,6 @@ if (!function_exists('req_param')) {
     }
 }
 
-/** Keep script_type sane (avoid weird junk). */
-if (!function_exists('normalize_script_type')) {
-    function normalize_script_type(?string $s): string {
-        $s = strtolower(trim((string)$s));
-        // allow letters, numbers, underscore only (matches your slugs like cold_call, voicemail, etc.)
-        $s = preg_replace('/[^a-z0-9_]/', '', $s);
-        return $s;
-    }
-}
-
-/** Validate cadence string against allowed values. */
-if (!function_exists('normalize_cadence')) {
-    function normalize_cadence(?string $s): ?string {
-        if ($s === null) return null;
-        $s = strtolower(trim($s));
-        return in_array($s, ['voicemail','mixed'], true) ? $s : null;
-    }
-}
-
 /**
  * Normalize tone value from UI dropdown.
  * Allowed: auto | friendly | consultative | direct
@@ -110,58 +91,57 @@ if (!function_exists('normalize_tone')) {
     }
 }
 
-try {
-    // ---- Inputs ----
-    $scriptTypeRaw = req_param('script_type');
-    $scriptType    = normalize_script_type($scriptTypeRaw);
-
-    $contactId   = (($v = req_param('contact_id'))   !== null && $v !== '') ? (int)$v : null;
-    $clientId    = (($v = req_param('client_id'))    !== null && $v !== '') ? (int)$v : null;
-    $jobId       = (($v = req_param('job_id'))       !== null && $v !== '') ? (int)$v : null;
-    $candidateId = (($v = req_param('candidate_id')) !== null && $v !== '') ? (int)$v : null;
-
-    // Prefer explicit contact over candidate fallback
-    if ($contactId) {
-        $candidateId = null;
+/**
+ * Canonical mapping: touch_number -> content_kind
+ * - voicemail: 1,3,5,7,9,11
+ * - email:     2,6,10,12
+ * - linkedin:  4,8
+ */
+if (!function_exists('pipeline_content_kind_for_touch')) {
+    function pipeline_content_kind_for_touch(int $touchNumber): string {
+        if (in_array($touchNumber, [1,3,5,7,9,11], true)) return 'cadence_voicemail';
+        if (in_array($touchNumber, [2,6,10,12], true))    return 'cadence_email';
+        if (in_array($touchNumber, [4,8], true))          return 'cadence_linkedin';
+        // Safety fallback (should never happen if touch validated)
+        return 'cadence_voicemail';
     }
+}
 
-    if ($scriptType === '') {
-        echo json_encode(['ok' => false, 'message' => 'Missing script_type'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+try {
+    // ---- Inputs (pipeline-only) ----
+    $contactId = (($v = req_param('contact_id')) !== null && $v !== '') ? (int)$v : null;
+    if (!$contactId) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'message' => 'Missing contact_id'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
     }
 
-    // Dropdown wins: tone
+    // tone: dropdown value. "auto" allowed.
     $toneParamRaw = req_param('tone');
     if ($toneParamRaw === null) {
-        $toneParamRaw = req_param('tone_mode'); // legacy fallback
+        $toneParamRaw = req_param('tone_mode'); // legacy UI param name; still accepted, same meaning
     }
     $toneRequested = normalize_tone($toneParamRaw);
 
-    // Flags
-    $includeSmalltalk  = (($v = req_param('include_smalltalk'))   !== null) ? ((int)$v !== 0) : true;
-    $includeMicroOffer = (($v = req_param('include_micro_offer')) !== null) ? ((int)$v !== 0) : true;
-
-    // Dropdown wins: cadence (may be null if not sent)
-    $cadenceType = normalize_cadence(req_param('cadence_type'));
-
-    // Dropdown wins: touch_number override for preview (may be null if not sent)
+    // touch_number: optional explicit override for preview; otherwise use DB outreach_stage
     $touchNumber = null;
     if (($tnRaw = req_param('touch_number')) !== null && $tnRaw !== '') {
         $tn = (int)$tnRaw;
         if ($tn > 0) $touchNumber = $tn;
     }
 
-    // Delivery type (vm/live) passed through to renderer
-    $delivery = req_param('delivery_type');
-    $delivery = $delivery ? strtolower(trim($delivery)) : null;
+    // NOTE: We intentionally IGNORE/REJECT legacy / removed concepts and params:
+    // - script_type (any legacy branching)
+    // - include_smalltalk, include_micro_offer
+    // - cadence_type (voicemail/mixed)
+    // - delivery_type (live_script / vm variants)
+    // - any other legacy script selectors
+    // Even if a user manipulates request params, this endpoint stays pipeline-only.
 
-    // ---- If contact exists, fetch defaults in ONE query ----
-    $row = null;
-    if ($contactId) {
-        $stmt = $pdo->prepare("SELECT outreach_stage, outreach_cadence, title FROM contacts WHERE id = ? LIMIT 1");
-        $stmt->execute([$contactId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
-    }
+    // ---- Fetch contact defaults in ONE query ----
+    $stmt = $pdo->prepare("SELECT outreach_stage, title FROM contacts WHERE id = ? LIMIT 1");
+    $stmt->execute([$contactId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 
     // Touch fallback from DB if not explicitly provided
     if ($touchNumber === null) {
@@ -170,46 +150,50 @@ try {
         $touchNumber = ($tn > 0) ? $tn : 1;
     }
 
-    // Cadence fallback from DB if not explicitly provided
-    if ($cadenceType === null) {
-        $savedCad = $row['outreach_cadence'] ?? null;
-        $cadenceType = normalize_cadence($savedCad) ?? 'voicemail';
+    // Validate touch_number within canonical 1..12
+    if ($touchNumber < 1 || $touchNumber > 12) {
+        http_response_code(400);
+        echo json_encode([
+            'ok'      => false,
+            'message' => 'Invalid touch_number (must be 1..12)',
+            'touch_number' => $touchNumber,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
     }
 
     // ---- Tone resolution ----
-    // Keep the contract: dropdown wins. If UI says auto, resolve it to a REAL tone based on contact title.
-    // (That means renderer will treat it as manual, and will NOT do its own auto inference.)
+    // Contract: dropdown wins. If UI says auto, resolve it to a REAL tone based on contact title.
     $toneResolved = $toneRequested;
     if ($toneRequested === 'auto') {
         if (!function_exists('tone_from_title')) {
             throw new RuntimeException('tone_from_title() not found; includes/script_rules.php not loaded.');
         }
-        $contactTitle = $row['title'] ?? null; // null → tone_from_title should return consultative
+        $contactTitle = $row['title'] ?? null; // null -> tone_from_title should return consultative
         $toneResolved = tone_from_title($contactTitle);
-        // hard safety
         if (!in_array($toneResolved, ['friendly','consultative','direct'], true)) {
             $toneResolved = 'consultative';
         }
     }
 
-    // ---- Build context for renderer ----
+    // ---- Canonical content_kind mapping ----
+    $contentKind = pipeline_content_kind_for_touch($touchNumber);
+
+    // ---- Build context for renderer (pipeline-only) ----
     $ctx = [
-        'script_type_slug'    => $scriptType,
-        'contact_id'          => $contactId,
-        'client_id'           => $clientId,
-        'job_id'              => $jobId,
-        'candidate_id'        => $candidateId,
+        'contact_id'    => $contactId,
 
-        // Send a concrete tone so renderer treats it as final
-        'tone_mode'           => $toneResolved,
+        // Canonical selectors
+        'touch_number'  => $touchNumber,
+        'tone_mode'     => $toneResolved,
+        'content_kind'  => $contentKind,
 
-        'include_smalltalk'   => $includeSmalltalk,
-        'include_micro_offer' => $includeMicroOffer,
+        // Removed concepts forced off (must not exist after changes)
+        'include_smalltalk'   => false,
+        'include_micro_offer' => false,
 
-        'touch_number'        => $touchNumber,
-        'cadence_type'        => $cadenceType,
-
-        'delivery_type'       => $delivery,
+        // TODO: If includes/script_renderer.php still expects any legacy fields (e.g. script_type_slug/cadence_type)
+        // it should be updated there to use ONLY (touch_number, tone_mode, content_kind) against script_templates_unified.
+        // We intentionally do NOT pass user-controlled script_type/cadence/delivery to avoid non-canonical scripts.
     ];
 
     // ---- Render ----
@@ -245,7 +229,7 @@ try {
 
         // Echo resolved values (for UI/log sanity)
         'touch_number'     => $touchNumber,
-        'cadence_type'     => $cadenceType,
+        'content_kind'     => $contentKind,
 
         // Debug: what did UI request vs what did we actually use?
         'tone_requested'   => $toneRequested,

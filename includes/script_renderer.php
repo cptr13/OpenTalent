@@ -1,6 +1,6 @@
 <?php
 // includes/script_renderer.php
-// Deterministic renderer for dynamic, tone-aware scripts (no AI).
+// Deterministic renderer for canonical outreach scripts (no AI, no legacy fallbacks).
 
 if (!defined('OT2_LOADED')) {
     define('OT2_LOADED', true);
@@ -31,6 +31,8 @@ if (file_exists(__DIR__ . '/cadence.php')) {
 
 /**
  * Render a personalized script based on context.
+ * Canonical-only: script_templates_unified is the ONLY source.
+ *
  * @param array $ctx
  * @return array {
  *   text: string,
@@ -48,16 +50,12 @@ function render_script(array $ctx): array {
     $missing  = [];
 
     // 1) Validate inputs
+    // Canonical pipeline-only default:
+    // If caller omits script_type_slug, assume 'pipeline' (do NOT hard-fail).
     $scriptType = trim((string)($ctx['script_type_slug'] ?? ''));
     if ($scriptType === '') {
-        return [
-            'text' => "Quick note on your hiring priorities.\nHappy to share a one-pager or schedule 15 minutes.",
-            'tone_used' => 'consultative',
-            'template_name' => 'generic',
-            'context' => [],
-            'missing' => ['script_type_slug'],
-            'warnings' => ['script_type_missing_generic_used']
-        ];
+        $scriptType = 'pipeline';
+        $warnings[] = 'defaulted_script_type_slug_pipeline';
     }
     $scriptType = strtolower($scriptType);
 
@@ -71,8 +69,13 @@ function render_script(array $ctx): array {
         $toneMode = 'auto';
     }
 
-    $includeSmalltalk  = array_key_exists('include_smalltalk', $ctx) ? (bool)$ctx['include_smalltalk'] : true;
-    $includeMicroOffer = array_key_exists('include_micro_offer', $ctx) ? (bool)$ctx['include_micro_offer'] : true;
+    // Canonical system rules:
+    // - No smalltalk
+    // - No microoffers
+    // - No legacy fallbacks
+    // (We accept the keys without using them to avoid breaking callers.)
+    $includeSmalltalk  = false;
+    $includeMicroOffer = false;
 
     // 2) Gather facts (now with candidate fallback + location/region derivation)
     $vars = hydrate_vars($contactId, $clientId, $jobId, $candidateId);
@@ -80,10 +83,6 @@ function render_script(array $ctx): array {
     // 3) Determine cadence + touch (UI may omit them; infer from contact row)
     $cadenceFromCtx = isset($ctx['cadence_type']) ? strtolower((string)$ctx['cadence_type']) : null;
 
-    // IMPORTANT:
-    // - Historically: cadence was only voicemail|mixed
-    // - Now: unified exists, and pipeline needs channel resolution.
-    // We will treat cadence_type as "unified" if the UI sends it.
     $allowedCadences = ['voicemail','mixed','unified'];
     if ($cadenceFromCtx !== null && !in_array($cadenceFromCtx, $allowedCadences, true)) {
         $cadenceFromCtx = null;
@@ -97,12 +96,9 @@ function render_script(array $ctx): array {
         }
     }
 
-    // Effective cadence:
-    // - If ctx specifies unified, honor it.
-    // - Else preserve legacy behavior (mixed normalized to voicemail).
     $cadenceTypeRaw = $cadenceFromCtx ?? $savedCad ?? 'voicemail';
 
-    // Normalize for legacy logic, but keep raw for debug
+    // Legacy normalize (kept for context), but canonical pipeline is independent of this.
     $cadenceType = $cadenceTypeRaw;
     if ($cadenceTypeRaw === 'mixed') {
         $cadenceType = 'voicemail';
@@ -115,21 +111,18 @@ function render_script(array $ctx): array {
             ? (int)$vars['outreach_stage_num']
             : 1);
 
+    $touchNumber = max(1, (int)$touchNumber);
+
     // Ensure cadence + touch are in the context for templates and for tone rules
-    $vars['cadence_type']        = $cadenceType;          // effective cadence used for logic/templates
-    $vars['cadence_type_raw']    = $cadenceTypeRaw;       // original (voicemail|mixed|unified)
+    $vars['cadence_type']        = $cadenceType;
+    $vars['cadence_type_raw']    = $cadenceTypeRaw;
     $vars['touch_number']        = $touchNumber;
-    $vars['attempt_count_total'] = max(1, (int)$touchNumber); // tone reacts to later touches
+    $vars['attempt_count_total'] = max(1, (int)$touchNumber);
 
     // Prefer centralized cadence metadata (labels/channels) if available.
-    // For pipeline: this is the primary source of truth.
     if (function_exists('cadence_lookup')) {
         try {
-            // FIX: pipeline must always use unified cadence metadata
-            $cadenceKey = ($scriptType === 'pipeline')
-                ? 'unified'
-                : (($cadenceTypeRaw === 'unified') ? 'unified' : $cadenceType);
-
+            $cadenceKey = ($scriptType === 'pipeline') ? 'unified' : (($cadenceTypeRaw === 'unified') ? 'unified' : $cadenceType);
             $meta = cadence_lookup($touchNumber, $cadenceKey);
 
             if (is_array($meta)) {
@@ -137,7 +130,6 @@ function render_script(array $ctx): array {
                     $vars['touch_label'] = (string)$meta['label'];
                 }
                 if (!empty($meta['channel'])) {
-                    // expected: call | call_vm | email | linkedin
                     $vars['channel'] = (string)$meta['channel'];
                 }
             }
@@ -147,7 +139,7 @@ function render_script(array $ctx): array {
     }
 
     // If cadence_lookup didn't provide channel (or cadence.php missing),
-    // apply a fallback mapping ONLY for the unified pipeline use case.
+    // apply canonical fallback mapping for the unified pipeline use case.
     if (empty($vars['channel']) && ($cadenceTypeRaw === 'unified' || $scriptType === 'pipeline')) {
         $vars['channel'] = unified_channel_fallback($touchNumber);
         if (empty($vars['touch_label'])) {
@@ -155,14 +147,12 @@ function render_script(array $ctx): array {
         }
     }
 
-    // Back-compat: if someone expects script_channel_for(), call it correctly.
-    // NOTE: your script_rules.php defines script_channel_for(string $cadence, int $touch): string
-    // The previous code passed totally wrong args and it would never work.
+    // Back-compat: if someone expects script_channel_for(), call it correctly (kept, but canonical mapping wins).
     if (empty($vars['channel']) && function_exists('script_channel_for')) {
         try {
             $ch = script_channel_for($cadenceType, $touchNumber);
             if (is_string($ch) && $ch !== '') {
-                $vars['channel'] = $ch; // 'email'|'linkedin'|'call'
+                $vars['channel'] = $ch;
             }
         } catch (Throwable $e) {
             // non-fatal
@@ -178,22 +168,10 @@ function render_script(array $ctx): array {
     // 4) Tone selection — DROPDOWN WINS
     // ----------------------------
     $toneUsed = null;
-    $toneMap  = [];
 
     if ($toneMode !== 'auto') {
-        // Explicit selection: keep tone_used as requested even if we must fallback phrases
         $toneUsed = $toneMode;
-        $toneMap  = build_tone_map($pdo, $toneMode, $vars);
-        if (!$toneMap) {
-            // Use consultative phrases if the selected kit is missing, but DO NOT change tone_used
-            $fallbackPhraseTone = 'consultative';
-            $toneMap = build_tone_map($pdo, $fallbackPhraseTone, $vars);
-            if (!$toneMap) {
-                $toneMap = [];
-            }
-        }
     } else {
-        // Auto inference by stage/persona
         $autoTone = pick_tone(
             null,
             $vars['outreach_stage_slug'] ?? null,
@@ -201,15 +179,14 @@ function render_script(array $ctx): array {
             $vars['contact_function'] ?? null
         );
         $toneUsed = $autoTone;
-        $toneMap  = build_tone_map($pdo, $autoTone, $vars);
-        if (!$toneMap) {
-            $toneUsed = 'consultative';
-            $toneMap  = build_tone_map($pdo, 'consultative', $vars);
-        }
     }
 
-    // 5) Resolve template variant (touch-driven) OR fall back to DB template
-    // Pipeline requires correct content_kind selection (email/linkedin/voicemail/live_script).
+    // Hard safety: canonical tones only.
+    if (!in_array($toneUsed, ['friendly','consultative','direct'], true)) {
+        $toneUsed = 'consultative';
+    }
+
+    // 5) Resolve canonical template variant from unified table ONLY.
     $variant = resolve_template_variant($pdo, $scriptType, $cadenceTypeRaw, $touchNumber, $vars, $toneUsed, $ctx);
     $templateName = null;
     $body         = null;
@@ -217,63 +194,41 @@ function render_script(array $ctx): array {
     if ($variant) {
         $templateName = $variant['name'];
         $body         = (string)$variant['body'];
-    } else {
-        // Existing behavior: use the active template by type slug (single body)
-        // (Pipeline generally should NOT land here unless you intentionally store legacy templates for 'pipeline'.)
-        $tpl = get_active_template_by_type_slug($pdo, $scriptType);
-        if ($tpl) {
-            $templateName = $tpl['name'] . ' (v' . (int)$tpl['version'] . ')';
-            $body         = (string)$tpl['body'];
-        }
     }
 
-    // 6) If no template at all, use generic
+    // 6) If canonical template missing, return clear not-found (NO fallback to legacy or generic).
     if ($body === null) {
-        return [
-            'text' => cleanup_text(default_generic_text($vars, $includeSmalltalk, $includeMicroOffer)),
-            'tone_used' => $toneUsed ?? 'consultative',
-            'template_name' => 'generic_fallback',
-            'context' => $vars,
-            'missing' => $missing,
-            'warnings' => array_merge($warnings, ['template_missing_generic_used'])
+        $missingKeys = [
+            'script_templates_unified',
+            'touch_number=' . $touchNumber,
+            'tone=' . $toneUsed,
+            'script_type=' . $scriptType,
         ];
+
+        // Add canonical kind/slug expectations for debug clarity
+        $expectedKind = canonical_content_kind_for_context($scriptType, $touchNumber, $vars, $ctx);
+        $expectedSlug = canonical_pipeline_slug($touchNumber, $toneUsed);
+        $missingKeys[] = 'content_kind=' . $expectedKind;
+        $missingKeys[] = 'template_slug=' . $expectedSlug;
+
+        $missing = array_merge($missing, $missingKeys);
+
+        return canonical_not_found_response('canonical_template_not_found', $missing, $warnings, $vars);
     }
 
-    // 7) Flags / optional inserts
-    $momentSmalltalk = '';
-    if ($includeSmalltalk && !empty($vars['contact_local_time'])) {
-        $momentSmalltalk = "By the way—it’s {$vars['contact_local_time']} your time; I’ll keep it brief.";
-    } elseif ($includeSmalltalk) {
-        $warnings[] = 'timezone_missing_smalltalk_suppressed';
-    }
-
-    $microOffer = '';
-    if ($includeMicroOffer) {
-        $stage = $vars['outreach_stage_slug'] ?? 'open';
-        if (in_array($stage, ['cold','open'], true)) {
-            $microOffer = "I can share a one-pager with our intake checklist.";
-        } elseif ($stage === 'followup') {
-            $microOffer = "We can deliver an initial slate in ~5 business days.";
-        }
-    }
-
-    // 8) Compose render data
+    // 7) Canonical: no smalltalk / microoffer injection.
     $data = $vars;
-    foreach ($toneMap as $k => $v) {
-        $data["tone.$k"] = $v;
-    }
-    $data['moment_smalltalk'] = $momentSmalltalk;
-    $data['micro_offer']      = $microOffer;
 
-    // 9) Render template (supports dotted keys + simple pipes)
+    // 8) Render template (supports dotted keys + simple pipes) then apply canonical {Token} placeholders.
     $rendered = mustache_render($body, $data);
+    $rendered = replace_canonical_placeholders($rendered, $vars);
 
-    // 9.1) Post-process for delivery type (Voicemail vs Live Call), and drop timing lines.
-    // For pipeline, delivery should follow channel.
+    // 9) Post-process for delivery type (Voicemail vs Live Call), and drop timing lines.
+    // Canonical pipeline kind decides delivery behavior.
     $delivery = detect_delivery_type($ctx, $scriptType, $vars);
     $rendered = post_process_delivery_text($rendered, $delivery);
 
-    // 10) Post-cleanup & line collapsing for missing role/days
+    // 10) Post-cleanup & line collapsing for missing role/days (kept, but safe).
     if (empty($vars['top_open_role']) || empty($vars['days_open_top_role'])) {
         $rendered = preg_replace(
             '/^.*Quick note on your .*?$/mi',
@@ -323,152 +278,51 @@ function pick_tone(?string $manual, ?string $stageSlug, ?int $touch, ?string $pe
 }
 
 /**
- * Resolve a per-touch template variant if available.
- * Tries a code-defined variant (script_rules.php) first, then DB lookups in script_templates_unified.
+ * Resolve a per-touch template variant.
+ * Canonical-only: lookup in script_templates_unified only.
  * Return shape: ['name' => string, 'body' => string]
  */
 function resolve_template_variant(PDO $pdo, string $scriptType, string $cadenceTypeRaw, int $touchNumber, array $vars, ?string $toneUsed = null, array $ctx = []): ?array
 {
-    // 1) Code-defined variants (lets us iterate without DB churn)
-    if (function_exists('script_template_for')) {
-        try {
-            $res = null;
-            try {
-                $rf = new ReflectionFunction('script_template_for');
-                $argc = $rf->getNumberOfParameters();
-                if ($argc >= 5) {
-                    $res = script_template_for($scriptType, $cadenceTypeRaw, $touchNumber, $vars, $toneUsed);
-                } else {
-                    $res = script_template_for($scriptType, $cadenceTypeRaw, $touchNumber, $vars);
-                }
-            } catch (Throwable $e) {
-                $res = script_template_for($scriptType, $cadenceTypeRaw, $touchNumber, $vars);
-            }
-
-            if (is_array($res) && isset($res['body'])) {
-                $name = $res['name'] ?? ($scriptType . ':' . $cadenceTypeRaw . ':T' . $touchNumber);
-                return ['name' => $name, 'body' => (string)$res['body']];
-            }
-        } catch (Throwable $e) {
-            // fall back
-        }
-    }
-
-    // 2) DB variants (script_templates_unified)
-    // PIPELINE MUST BE DETERMINISTIC BY TOUCH → CONTENT_KIND (no delivery heuristics).
-    if (strtolower(trim($scriptType)) === 'pipeline') {
-        $tone = $toneUsed ?: 'consultative';
-
-        // Canonical mapping (single source of truth).
-        $kind = null;
-        if (function_exists('pipeline_content_kind_for_touch')) {
-            $kind = pipeline_content_kind_for_touch($touchNumber);
-        } else {
-            // Hard fallback (should not happen if script_rules.php is loaded)
-            $t = max(1, (int)$touchNumber);
-            if ($t === 4) $kind = 'cadence_linkedin';
-            elseif (in_array($t, [3,7,11], true)) $kind = 'live_script';
-            elseif (in_array($t, [1,5,9], true))  $kind = 'voicemail';
-            else $kind = 'cadence_email';
-        }
-
-        // Strict: status active, exact touch, exact kind, slug prefix must match pipeline templates.
-        $row = find_pipeline_unified_variant($pdo, $kind, $touchNumber, $tone);
-        if ($row) {
-            return [
-                'name' => build_pipeline_name($row),
-                'body' => (string)$row['body'],
-            ];
-        }
-
-        // Tone fallback allowed (your rule): pick any tone if the requested tone row is missing.
-        $row = find_pipeline_unified_variant_any_tone($pdo, $kind, $touchNumber);
-        if ($row) {
-            return [
-                'name' => build_pipeline_name($row),
-                'body' => (string)$row['body'],
-            ];
-        }
-
-        // If truly missing, allow caller to fall through to legacy/generic.
-        return null;
-    }
-
-    // Non-pipeline behavior: delivery inference + flexible kind sets
-    $delivery = infer_delivery_from_script_type_and_context($scriptType, $vars, $ctx);
-
-    // Normalize acceptable content_kind values we’ll accept in queries for each delivery/kind
-    $kinds = delivery_to_kind_set($delivery);
-
     $tone = $toneUsed ?: 'consultative';
+    if (!in_array($tone, ['friendly','consultative','direct'], true)) {
+        $tone = 'consultative';
+    }
 
-    $row = find_unified_variant($pdo, $kinds, $touchNumber, $tone);
+    $kind = canonical_content_kind_for_context($scriptType, $touchNumber, $vars, $ctx);
+
+    // Canonical slug contract applies to pipeline.
+    $expectedSlug = canonical_pipeline_slug($touchNumber, $tone);
+
+    $row = find_canonical_unified_variant($pdo, $kind, $touchNumber, $tone, $expectedSlug);
     if ($row) {
         return [
-            'name' => build_unified_name($row, $delivery, $touchNumber, $tone),
+            'name' => build_pipeline_name($row),
             'body' => (string)$row['body'],
         ];
     }
 
-    $row = find_unified_variant_any_tone($pdo, $kinds, $touchNumber);
-    if ($row) {
-        return [
-            'name' => build_unified_name($row, $delivery, $touchNumber, (string)($row['tone_default'] ?? 'consultative')),
-            'body' => (string)$row['body'],
-        ];
-    }
-
-    $row = find_unified_variant_no_touch($pdo, $kinds, $tone);
-    if ($row) {
-        return [
-            'name' => build_unified_name($row, $delivery, $touchNumber, $tone),
-            'body' => (string)$row['body'],
-        ];
-    }
-
-    $row = find_unified_variant_kind_only($pdo, $kinds);
-    if ($row) {
-        return [
-            'name' => build_unified_name($row, $delivery, $touchNumber, (string)($row['tone_default'] ?? 'consultative')),
-            'body' => (string)$row['body'],
-        ];
-    }
-
+    // No tone fallback, no kind fallback, no legacy fallback.
     return null;
 }
 
 /**
- * PIPELINE DB lookup: strict match for canonical pipeline templates.
- * Enforces template_slug prefix to avoid pulling unrelated unified templates.
+ * Canonical DB lookup: strict match for canonical templates.
+ * Enforces exact template_slug for pipeline contract.
  */
-function find_pipeline_unified_variant(PDO $pdo, string $kind, int $touchNumber, string $tone) {
+function find_canonical_unified_variant(PDO $pdo, string $kind, int $touchNumber, string $tone, string $expectedSlug) {
     $sql = "
         SELECT id, template_slug, content_kind, touch_number, tone_default, body, status, updated_at
         FROM script_templates_unified
         WHERE status = 'active'
-          AND template_slug LIKE 'pipeline_step%'
+          AND template_slug = ?
           AND content_kind = ?
           AND touch_number = ?
           AND LOWER(tone_default) = LOWER(?)
         ORDER BY updated_at DESC, id DESC
         LIMIT 1
     ";
-    return db_first_row($pdo, $sql, [$kind, $touchNumber, $tone]);
-}
-
-/** PIPELINE DB lookup: same touch/kind, any tone (prefer consultative if tied) */
-function find_pipeline_unified_variant_any_tone(PDO $pdo, string $kind, int $touchNumber) {
-    $sql = "
-        SELECT id, template_slug, content_kind, touch_number, tone_default, body, status, updated_at
-        FROM script_templates_unified
-        WHERE status = 'active'
-          AND template_slug LIKE 'pipeline_step%'
-          AND content_kind = ?
-          AND touch_number = ?
-        ORDER BY (LOWER(tone_default) = 'consultative') DESC, updated_at DESC, id DESC
-        LIMIT 1
-    ";
-    return db_first_row($pdo, $sql, [$kind, $touchNumber]);
+    return db_first_row($pdo, $sql, [$expectedSlug, $kind, $touchNumber, $tone]);
 }
 
 /** Build readable name for pipeline templates (uses actual row identifiers) */
@@ -482,121 +336,60 @@ function build_pipeline_name(array $row): string {
 }
 
 /**
- * Infer delivery/kind:
- * - voicemail -> voicemail
- * - cold_call/live_call/call -> live
- * - pipeline -> based on vars['channel'] (email/linkedin/call_vm/call)
+ * Canonical content_kind mapping for unified pipeline.
+ * Final allowed kinds:
+ * - cadence_voicemail: steps 1,3,5,7,9,11
+ * - cadence_email: steps 2,6,10,12
+ * - cadence_linkedin: steps 4,8
  */
-function infer_delivery_from_script_type_and_context(string $scriptType, array $vars, array $ctx): string {
+function canonical_content_kind_for_touch(int $touchNumber): string {
+    $t = max(1, (int)$touchNumber);
+
+    if (in_array($t, [1,3,5,7,9,11], true)) return 'cadence_voicemail';
+    if (in_array($t, [2,6,10,12], true)) return 'cadence_email';
+    if (in_array($t, [4,8], true)) return 'cadence_linkedin';
+
+    // Should never happen with 1-12, but keep deterministic.
+    return 'cadence_voicemail';
+}
+
+/**
+ * Canonical kind selection for this context.
+ * For now, pipeline is the canonical system. We still map non-pipeline deterministically into the canonical kinds
+ * to avoid any old "live_script" or other removed kinds.
+ */
+function canonical_content_kind_for_context(string $scriptType, int $touchNumber, array $vars, array $ctx): string {
     $s = strtolower(trim($scriptType));
 
     if ($s === 'pipeline') {
-        $ch = $vars['channel'] ?? ($ctx['channel'] ?? null);
-        $ch = $ch ? normalize_channel((string)$ch) : null;
-
-        if ($ch === 'email') return 'email';
-        if ($ch === 'linkedin') return 'linkedin';
-        if ($ch === 'call_vm') return 'voicemail';
-        if ($ch === 'call') return 'live';
-
-        // If pipeline but no channel, treat as live to avoid VM markers
-        return 'live';
+        return canonical_content_kind_for_touch($touchNumber);
     }
 
-    if ($s === 'voicemail' || strpos($s, 'voice') !== false || $s === 'vm') return 'voicemail';
+    // If something else calls this renderer, we still only allow canonical kinds.
+    // Prefer explicit channel if present, else map by touch.
+    $ch = $vars['channel'] ?? ($ctx['channel'] ?? null);
+    $ch = $ch ? normalize_channel((string)$ch) : null;
 
-    // everything else treats as live (cold_call, live_call, call, etc.)
-    return 'live';
+    if ($ch === 'email') return 'cadence_email';
+    if ($ch === 'linkedin') return 'cadence_linkedin';
+
+    // call/call_vm and unknown fall back to voicemail kind (canonical).
+    return 'cadence_voicemail';
 }
 
-/** Map delivery/kind to acceptable content_kind values (handles different labels you might have used). */
-function delivery_to_kind_set(string $delivery): array {
-    $d = strtolower($delivery);
+/**
+ * Canonical slug for pipeline rows: pipeline_step{NN}_{tone}
+ */
+function canonical_pipeline_slug(int $touchNumber, string $tone): string {
+    $t = max(1, (int)$touchNumber);
+    $nn = str_pad((string)$t, 2, '0', STR_PAD_LEFT);
 
-    if ($d === 'email') {
-        return ['email', 'email_script', 'email_touch'];
+    $tone = strtolower(trim($tone));
+    if (!in_array($tone, ['friendly','consultative','direct'], true)) {
+        $tone = 'consultative';
     }
-    if ($d === 'linkedin') {
-        return ['linkedin', 'linkedin_script', 'li', 'dm'];
-    }
-    if ($d === 'voicemail') {
-        return ['voicemail', 'voicemail_script', 'vm'];
-    }
-    // live/call family
-    return ['live', 'live_call', 'call', 'cold_call', 'live_script'];
-}
 
-/** Build a readable template name for debugging/UI */
-function build_unified_name(array $row, string $delivery, int $touchNumber, string $tone): string {
-    $kind = $row['content_kind'] ?? $delivery;
-    $tn   = (string)($row['touch_number'] ?? $touchNumber);
-    $t    = (string)($row['tone_default'] ?? $tone);
-    $id   = (string)($row['id'] ?? '?');
-    return "unified:{$kind}:T{$tn}:tone={$t} #{$id}";
-}
-
-/** Strict match: kind IN (…) AND touch_number = ? AND tone_default = ? AND status='active' */
-function find_unified_variant(PDO $pdo, array $kinds, int $touchNumber, string $tone) {
-    $in = implode(',', array_fill(0, count($kinds), '?'));
-    $sql = "
-        SELECT id, content_kind, touch_number, tone_default, body, status, updated_at
-        FROM script_templates_unified
-        WHERE status = 'active'
-          AND content_kind IN ($in)
-          AND (touch_number = ?)
-          AND LOWER(tone_default) = LOWER(?)
-        ORDER BY updated_at DESC
-        LIMIT 1
-    ";
-    $params = array_merge($kinds, [$touchNumber, $tone]);
-    return db_first_row($pdo, $sql, $params);
-}
-
-/** Same kind + touch_number, any tone (prefer consultative if tied by updated_at) */
-function find_unified_variant_any_tone(PDO $pdo, array $kinds, int $touchNumber) {
-    $in = implode(',', array_fill(0, count($kinds), '?'));
-    $sql = "
-        SELECT id, content_kind, touch_number, tone_default, body, status, updated_at
-        FROM script_templates_unified
-        WHERE status = 'active'
-          AND content_kind IN ($in)
-          AND (touch_number = ?)
-        ORDER BY (LOWER(tone_default) = 'consultative') DESC, updated_at DESC
-        LIMIT 1
-    ";
-    $params = array_merge($kinds, [$touchNumber]);
-    return db_first_row($pdo, $sql, $params);
-}
-
-/** Same kind + tone, but no touch_number (NULL or 0) */
-function find_unified_variant_no_touch(PDO $pdo, array $kinds, string $tone) {
-    $in = implode(',', array_fill(0, count($kinds), '?'));
-    $sql = "
-        SELECT id, content_kind, touch_number, tone_default, body, status, updated_at
-        FROM script_templates_unified
-        WHERE status = 'active'
-          AND content_kind IN ($in)
-          AND (touch_number IS NULL OR touch_number = 0)
-          AND LOWER(tone_default) = LOWER(?)
-        ORDER BY updated_at DESC
-        LIMIT 1
-    ";
-    $params = array_merge($kinds, [$tone]);
-    return db_first_row($pdo, $sql, $params);
-}
-
-/** Same kind only, any tone, pick most recent */
-function find_unified_variant_kind_only(PDO $pdo, array $kinds) {
-    $in = implode(',', array_fill(0, count($kinds), '?'));
-    $sql = "
-        SELECT id, content_kind, touch_number, tone_default, body, status, updated_at
-        FROM script_templates_unified
-        WHERE status = 'active'
-          AND content_kind IN ($in)
-        ORDER BY updated_at DESC
-        LIMIT 1
-    ";
-    return db_first_row($pdo, $sql, $kinds);
+    return "pipeline_step{$nn}_{$tone}";
 }
 
 /** Fetch first row helper */
@@ -621,12 +414,12 @@ function normalize_channel(string $ch): string {
 
 /**
  * Fallback unified channel mapping (only if cadence_lookup is absent).
- * This should mirror your unified labels and expected cadence behavior.
+ * Must match the UI contract labels/steps.
  */
 function unified_channel_fallback(int $touch): string {
     $t = max(1, (int)$touch);
 
-    // Based on your displayed unified labels:
+    // UI contract mapping:
     // 1 Call
     // 2 Email / Call (No Email)
     // 3 Call
@@ -642,10 +435,9 @@ function unified_channel_fallback(int $touch): string {
     if (in_array($t, [2,6,10,12], true)) return 'email';
     if (in_array($t, [4,8], true)) return 'linkedin';
 
-    // Calls: decide VM vs live.
-    // If you want touch 1/5/9 to be voicemail and 3/7/11 to be live, do that here.
-    if (in_array($t, [1,5,9], true)) return 'call_vm';
-    return 'call';
+    // Canonical: "call" steps are stored as cadence_voicemail kind.
+    // We keep call_vm for the post-processing logic, but the template lookup uses canonical kind mapping.
+    return 'call_vm';
 }
 
 /**
@@ -654,6 +446,69 @@ function unified_channel_fallback(int $touch): string {
 function unified_label_fallback(int $touch): string {
     $t = max(1, (int)$touch);
     return "Touch {$t}";
+}
+
+/**
+ * Canonical not-found response (no fallbacks).
+ */
+function canonical_not_found_response(string $reason, array $missing, array $warnings, array $vars): array {
+    $warnings[] = $reason;
+
+    return [
+        'text'          => '[CANONICAL SCRIPT NOT FOUND]',
+        'tone_used'     => 'consultative',
+        'template_name' => 'not_found',
+        'context'       => $vars,
+        'missing'       => $missing,
+        'warnings'      => $warnings,
+    ];
+}
+
+/**
+ * Canonical placeholder replacement for single-brace tokens:
+ * {FirstName}, {YourName}, {FirmName}, {Industry}
+ * - Unresolved -> empty string
+ * - Never show raw {Token}
+ */
+function replace_canonical_placeholders(string $text, array $vars): string {
+    $firstName = '';
+    if (!empty($vars['first_name'])) {
+        $firstName = (string)$vars['first_name'];
+    } elseif (!empty($vars['contact_first']) && (string)$vars['contact_first'] !== 'there') {
+        $firstName = (string)$vars['contact_first'];
+    }
+
+    $yourName = '';
+    if (!empty($vars['user_first'])) {
+        $yourName = (string)$vars['user_first'];
+    } elseif (!empty($vars['your_name'])) {
+        $yourName = (string)$vars['your_name'];
+    }
+
+    $firmName = '';
+    if (!empty($vars['your_agency'])) {
+        $firmName = (string)$vars['your_agency'];
+    }
+
+    $industry = '';
+    if (!empty($vars['industry'])) {
+        $industry = (string)$vars['industry'];
+    }
+
+    $repl = [
+        '{FirstName}' => $firstName,
+        '{YourName}'  => $yourName,
+        '{FirmName}'  => $firmName,
+        '{Industry}'  => $industry,
+    ];
+
+    $text = strtr($text, $repl);
+
+    // Strip any remaining single-brace {Token} so users never see raw placeholders.
+    // (We only target identifier-like tokens to avoid nuking normal braces in prose.)
+    $text = preg_replace('/\{[A-Za-z][A-Za-z0-9_]*\}/u', '', $text);
+
+    return $text;
 }
 
 /**
@@ -923,27 +778,13 @@ function hydrate_vars(?int $contactId, ?int $clientId, ?int $jobId, ?int $candid
     return $vars;
 }
 
-/**
- * Build tone map by slug, rendering each phrase with the available vars.
- * @return array<string,string>
- */
-function build_tone_map(PDO $pdo, string $toneSlug, array $vars): array {
-    $kit = get_tone_kit_by_slug($pdo, $toneSlug);
-    if (!$kit) return [];
-
-    $phrases = get_tone_phrases_map($pdo, (int)$kit['id']);
-    $map = [];
-    foreach ($phrases as $k => $txt) {
-        $map[$k] = mustache_render($txt, flatten_vars_for_render($vars));
-    }
-    return $map;
-}
-
 // -------------------------------
 // Helpers
 // -------------------------------
 
 function default_generic_text(array $vars, bool $includeSmalltalk, bool $includeMicroOffer): string {
+    // NOTE: Canonical-only system should never use this.
+    // Kept for compatibility if some other caller uses it directly.
     $s = [];
     $greeting = $vars['contact_first'] ? "Hi {$vars['contact_first']}," : "Hi there,";
     $touchTag = isset($vars['touch_number']) ? " (Touch {$vars['touch_number']})" : '';
@@ -1034,6 +875,7 @@ function mustache_render(string $tpl, array $vars): string {
         $pipe = isset($m[2]) ? ltrim($m[2], '|') : null;
 
         if (!array_key_exists($key, $map) || (string)$map[$key] === '') {
+            // Keep unresolved moustache tokens as-is; canonical single-brace tokens are handled separately.
             return '{{' . $key . '}}';
         }
 
@@ -1106,29 +948,23 @@ function cleanup_text(string $txt): string {
 
 /**
  * Detect delivery type.
- * Returns 'voicemail' or 'live'. For pipeline email/linkedin, we treat as 'live' for post-processing
- * (meaning: strip VM-only parts).
+ * Canonical:
+ * - cadence_voicemail => voicemail post-processing
+ * - cadence_email / cadence_linkedin => treat as live for post-processing (strip VM-only parts)
  */
 function detect_delivery_type(array $ctx, string $scriptType, array $vars = []): string {
     $st = strtolower((string)$scriptType);
 
     if ($st === 'pipeline') {
-        $ch = $vars['channel'] ?? ($ctx['channel'] ?? null);
-        $ch = $ch ? normalize_channel((string)$ch) : null;
-
-        if ($ch === 'call_vm') return 'voicemail';
-        // email/linkedin/call -> treat as live (strip VM-only markers)
+        $kind = canonical_content_kind_for_touch((int)($vars['touch_number'] ?? 1));
+        if ($kind === 'cadence_voicemail') return 'voicemail';
         return 'live';
     }
 
-    $raw = strtolower((string)($ctx['delivery_type'] ?? $scriptType));
-    if (strpos($raw, 'voice') !== false || $raw === 'vm') {
-        return 'voicemail';
-    }
-    if (strpos($raw, 'cold') !== false || strpos($raw, 'live') !== false || strpos($raw, 'call') !== false) {
-        return 'live';
-    }
-    return 'voicemail';
+    // Non-pipeline: still only canonical kinds.
+    $kind = canonical_content_kind_for_context($scriptType, (int)($vars['touch_number'] ?? 1), $vars, $ctx);
+    if ($kind === 'cadence_voicemail') return 'voicemail';
+    return 'live';
 }
 
 /**

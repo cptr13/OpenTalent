@@ -66,28 +66,9 @@ CREATE TABLE IF NOT EXISTS candidates (
   contract_filename VARCHAR(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Clients
-CREATE TABLE IF NOT EXISTS clients (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  phone VARCHAR(50) DEFAULT NULL,
-  location VARCHAR(255) DEFAULT NULL,
-  industry VARCHAR(255) DEFAULT NULL,
-  company_size VARCHAR(255) DEFAULT NULL,
-  url VARCHAR(255) DEFAULT NULL,
-  linkedin VARCHAR(255) DEFAULT NULL,
-  account_manager VARCHAR(255) DEFAULT NULL,
-  about TEXT,
-  contract_filename VARCHAR(255) DEFAULT NULL,
-  status VARCHAR(50) DEFAULT 'Active',
-  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  primary_contact_id INT(11) DEFAULT NULL,
-  CONSTRAINT fk_primary_contact FOREIGN KEY (primary_contact_id)
-    REFERENCES contacts(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Contacts
+-- -------------------------------------------------
+-- Contacts (created BEFORE clients; FK added AFTER both exist)
+-- -------------------------------------------------
 CREATE TABLE IF NOT EXISTS contacts (
   id INT AUTO_INCREMENT PRIMARY KEY,
   client_id INT(11) DEFAULT NULL,
@@ -118,8 +99,81 @@ CREATE TABLE IF NOT EXISTS contacts (
   is_primary_contact TINYINT(1) DEFAULT 0,
   created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
+  INDEX idx_contacts_client_id (client_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Clients
+CREATE TABLE IF NOT EXISTS clients (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  phone VARCHAR(50) DEFAULT NULL,
+  location VARCHAR(255) DEFAULT NULL,
+  industry VARCHAR(255) DEFAULT NULL,
+  company_size VARCHAR(255) DEFAULT NULL,
+  url VARCHAR(255) DEFAULT NULL,
+  linkedin VARCHAR(255) DEFAULT NULL,
+  account_manager VARCHAR(255) DEFAULT NULL,
+  about TEXT,
+  contract_filename VARCHAR(255) DEFAULT NULL,
+  status VARCHAR(50) DEFAULT 'Active',
+  created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  primary_contact_id INT(11) DEFAULT NULL,
+  INDEX idx_clients_primary_contact_id (primary_contact_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Add circular foreign keys AFTER both tables exist
+-- Idempotent (safe to re-run): drop any existing matching FK, then add
+-- ------------------------------------------------------------
+
+-- contacts.client_id -> clients.id
+SET @fk_contacts_client := (
+  SELECT rc.CONSTRAINT_NAME
+  FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+  WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
+    AND rc.TABLE_NAME = 'contacts'
+    AND rc.REFERENCED_TABLE_NAME = 'clients'
+  LIMIT 1
+);
+
+SET @sql_drop_fk_contacts_client := IF(
+  @fk_contacts_client IS NULL,
+  'SELECT "fk contacts->clients absent, skipping drop" AS info;',
+  CONCAT('ALTER TABLE contacts DROP FOREIGN KEY `', @fk_contacts_client, '`;')
+);
+
+PREPARE stmt_drop_fk_contacts_client FROM @sql_drop_fk_contacts_client;
+EXECUTE stmt_drop_fk_contacts_client;
+DEALLOCATE PREPARE stmt_drop_fk_contacts_client;
+
+ALTER TABLE contacts
+  ADD CONSTRAINT fk_contacts_client
+  FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL;
+
+-- clients.primary_contact_id -> contacts.id
+SET @fk_primary_contact := (
+  SELECT rc.CONSTRAINT_NAME
+  FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+  WHERE rc.CONSTRAINT_SCHEMA = DATABASE()
+    AND rc.TABLE_NAME = 'clients'
+    AND rc.REFERENCED_TABLE_NAME = 'contacts'
+  LIMIT 1
+);
+
+SET @sql_drop_fk_primary_contact := IF(
+  @fk_primary_contact IS NULL,
+  'SELECT "fk clients->contacts absent, skipping drop" AS info;',
+  CONCAT('ALTER TABLE clients DROP FOREIGN KEY `', @fk_primary_contact, '`;')
+);
+
+PREPARE stmt_drop_fk_primary_contact FROM @sql_drop_fk_primary_contact;
+EXECUTE stmt_drop_fk_primary_contact;
+DEALLOCATE PREPARE stmt_drop_fk_primary_contact;
+
+ALTER TABLE clients
+  ADD CONSTRAINT fk_primary_contact
+  FOREIGN KEY (primary_contact_id) REFERENCES contacts(id) ON DELETE SET NULL;
 
 -- Jobs
 CREATE TABLE IF NOT EXISTS jobs (
@@ -233,31 +287,7 @@ CREATE TABLE IF NOT EXISTS outreach_templates (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- (Optional) Outreach Templates content seed
-INSERT IGNORE INTO outreach_templates (id, stage_number, channel, subject, body) VALUES
-(1, 1, 'email', 'Connecting About Hiring Support at {{company_name}}',
-'Hi {{first_name}},\n\nI’m reaching out to introduce myself — I run a recruiting firm that helps companies like {{company_name}} find top talent across technology, engineering, operations, and finance.\n\nWould you be open to a quick call this week to see if we might be a fit as a recruiting partner?\n\nBest regards,\n{{your_name}}\n{{your_agency}}'),
-(2, 2, 'linkedin', NULL,
-'Hi {{first_name}}, I sent a quick note via email and wanted to connect here as well. I’d love to hear how you’re handling talent acquisition at {{company_name}}.'),
-(3, 3, 'email', 'Following Up on My Note',
-'Hi {{first_name}},\n\nJust following up on my earlier note. My firm provides highly targeted recruiting across professional and technical roles, including direct hire, contract, and interim.\n\nWould it make sense to connect for a few minutes this week?\n\nThanks again,\n{{your_name}}'),
-(4, 4, 'linkedin', NULL,
-'Hey {{first_name}}, just checking in again. I\'m happy to share a bit more about how we support hiring teams like yours.'),
-(5, 5, 'email', 'Talent Gaps at {{company_name}}?',
-'Hi {{first_name}},\n\nIs your team facing any hiring challenges right now? We help companies like {{company_name}} fill hard-to-find roles quickly without sacrificing quality.\n\nLet me know if it’s worth a quick chat.\n\nBest,\n{{your_name}}'),
-(6, 6, 'linkedin', NULL,
-'Still open to a quick conversation, {{first_name}}? Even if there’s nothing urgent, I’d love to learn about your team and keep in touch.'),
-(7, 7, 'email', 'Still Worth a Quick Chat?',
-'Hi {{first_name}},\n\nI’m still hopeful we can connect. I understand timing is everything. Even if now isn’t ideal, I’d love to introduce what we do and stay in touch for when needs arise.\n\nThanks for considering,\n{{your_name}}'),
-(8, 8, 'linkedin', NULL,
-'Hi {{first_name}}, I’ll stop chasing for now. If it ever makes sense to connect about talent strategy or hiring support, we’re here to help.'),
-(9, 9, 'email', 'Final Follow-Up (For Now)',
-'Hi {{first_name}},\n\nThis will be my last outreach for now. If you’re ever open to chatting about talent needs, even informally, I’d be happy to connect.\n\nWishing you continued success,\n{{your_name}}\n{{your_agency}}'),
-(10, 10, 'linkedin', NULL,
-'Just one last ping in case this got buried. I\'m happy to step back and reconnect down the road if that’s better timing.'),
-(11, 11, 'call', NULL,
-'Hi {{first_name}}, this is {{your_name}} with {{your_agency}}. I sent over a couple of notes recently and just wanted to quickly introduce myself and see if there’s ever a chance we could support your hiring efforts. You can reach me directly at {{your_phone}}. Thanks!'),
-(12, 12, 'email', 'Should I Stay on Your Radar?',
-'Hi {{first_name}},\n\nI haven’t heard back, and that’s completely okay. I know how busy things get.\n\nWould it be helpful if I checked back in a few months, or would you prefer I hold off? Either way, wishing you all the best in your role.\n\n– {{your_name}}');
+-- NOTE: Intentionally NOT seeding outreach_templates. Canonical outreach scripts are locked to script_templates_unified.
 
 -- KPI / Quota Tracking
 CREATE TABLE IF NOT EXISTS kpi_status_map (
@@ -356,7 +386,8 @@ CREATE TABLE IF NOT EXISTS kpi_goal_audit (
   KEY idx_target_user_metric_period (target_user_id, metric, period),
   KEY idx_changed_at (changed_at),
   KEY fk_audit_changed_by (changed_by),
-  CONSTRAINT fk_audit_changed_by FOREIGN KEY (changed_by) ON UPDATE CASCADE REFERENCES users(id),
+  -- FIXED: correct MariaDB/MySQL FK syntax order
+  CONSTRAINT fk_audit_changed_by FOREIGN KEY (changed_by) REFERENCES users(id) ON UPDATE CASCADE,
   CONSTRAINT fk_audit_goal FOREIGN KEY (goal_id) REFERENCES kpi_goals(id) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -443,7 +474,7 @@ CREATE TABLE IF NOT EXISTS script_types (
   UNIQUE KEY ux_script_types_slug (slug)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Tone Kits (e.g., friendly, consultative, direct)
+-- Tone Kits (e.g., friendly, consultative, plus direct)
 CREATE TABLE IF NOT EXISTS tone_kits (
   id INT AUTO_INCREMENT PRIMARY KEY,
   slug VARCHAR(64) NOT NULL,
@@ -466,6 +497,27 @@ CREATE TABLE IF NOT EXISTS tone_phrases (
   UNIQUE KEY uniq_tone_key (tone_kit_id, `key`),
   CONSTRAINT fk_tp_tonekit FOREIGN KEY (tone_kit_id) REFERENCES tone_kits(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tone Phrases (Friendly)
+INSERT IGNORE INTO tone_phrases (tone_kit_id, `key`, text) VALUES
+  (1, 'greeting', 'Hey {{contact_first}},'),
+  (1, 'permission_check', 'Got a quick second?'),
+  (1, 'value_line', 'We help teams like yours keep hiring painless.'),
+  (1, 'close', 'Want me to send that over?');
+
+-- Tone Phrases (Consultative)
+INSERT IGNORE INTO tone_phrases (tone_kit_id, `key`, text) VALUES
+  (2, 'greeting', 'Hi {{contact_first}}, appreciate your time.'),
+  (2, 'permission_check', 'Okay to take 30 seconds?'),
+  (2, 'value_line', 'We typically shorten time-to-slate by tightening intake and aligning early.'),
+  (2, 'close', 'Would it help if I sent a one-pager?');
+
+-- Tone Phrases (Direct)
+INSERT IGNORE INTO tone_phrases (tone_kit_id, `key`, text) VALUES
+  (3, 'greeting', '{{contact_first}}, good {{local_part_of_day}}.'),
+  (3, 'permission_check', '30 seconds—yes or no?'),
+  (3, 'value_line', 'Vetted slate in 5 days, ~20% fee, 8-week guarantee.'),
+  (3, 'close', 'Send one-pager or book 15?');
 
 -- Script Templates (versioned, one 'active' per type at a time)
 CREATE TABLE IF NOT EXISTS script_templates (
@@ -546,35 +598,14 @@ INSERT IGNORE INTO tone_kits (id, slug, name, version, is_active) VALUES
   (2, 'consultative', 'Consultative', 1, 1),
   (3, 'direct', 'Direct', 1, 1);
 
--- Tone Phrases (Friendly)
-INSERT IGNORE INTO tone_phrases (tone_kit_id, `key`, text) VALUES
-  (1, 'greeting', 'Hey {{contact_first}},'),
-  (1, 'permission_check', 'Got a quick second?'),
-  (1, 'value_line', 'We help teams like yours keep hiring painless.'),
-  (1, 'close', 'Want me to send that over?');
-
--- Tone Phrases (Consultative)
-INSERT IGNORE INTO tone_phrases (tone_kit_id, `key`, text) VALUES
-  (2, 'greeting', 'Hi {{contact_first}}, appreciate your time.'),
-  (2, 'permission_check', 'Okay to take 30 seconds?'),
-  (2, 'value_line', 'We typically shorten time-to-slate by tightening intake and aligning early.'),
-  (2, 'close', 'Would it help if I sent a one-pager?');
-
--- Tone Phrases (Direct)
-INSERT IGNORE INTO tone_phrases (tone_kit_id, `key`, text) VALUES
-  (3, 'greeting', '{{contact_first}}, good {{local_part_of_day}}.'),
-  (3, 'permission_check', '30 seconds—yes or no?'),
-  (3, 'value_line', 'Vetted slate in 5 days, ~20% fee, 8-week guarantee.'),
-  (3, 'close', 'Send one-pager or book 15?');
-
 -- Script Templates (one active per type)
+-- NOTE: Canonical cadence lives in script_templates_unified.
 INSERT IGNORE INTO script_templates (script_type_id, name, version, body, status) VALUES
   -- Cold Call v1
   (1, 'Cold Call - v1', 1,
 '{{tone.greeting}} {{tone.permission_check}}
 Quick note on your {{top_open_role}}—looks open ~{{days_open_top_role}} days.
-{{tone.value_line}} {{moment_smalltalk}}
-{{micro_offer}}
+{{tone.value_line}}
 {{tone.close}}', 'active'),
   -- Voicemail v1
   (2, 'Voicemail - v1', 1,
@@ -609,148 +640,144 @@ VALUES (
 ON DUPLICATE KEY UPDATE id = id;
 
 -- -------------------------------------------------------------------
--- NEW: Unified templates for live + cadence (slug-based) — 2025-10-26
+-- LOCKED: Unified canonical outreach scripts (slug-based)
+-- 12 steps × 3 tones = 36 active rows
+-- Canonical keys: (touch_number, tone_default, content_kind) + status='active'
+-- Canonical slugs: pipeline_step{NN}_{tone} (NN = 01..12)
+-- Canonical kinds: cadence_voicemail, cadence_email, cadence_linkedin
+-- Canonical tokens: {FirstName}, {YourName}, {FirmName}, {Industry}
+-- Steps 3/7/11: cadence_voicemail with body exactly "No Voicemail"
 -- -------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS script_templates_unified (
   id INT AUTO_INCREMENT PRIMARY KEY,
   template_slug VARCHAR(191) NOT NULL,
   content_kind ENUM(
-    'live_script',
-    'voicemail',
-    'cadence_email',
-    'cadence_linkedin_request',
-    'cadence_linkedin_dm',
     'cadence_voicemail',
-    'cadence_sms'
+    'cadence_email',
+    'cadence_linkedin'
   ) NOT NULL,
-  touch_number TINYINT NULL,                         -- NULL for live_script
-  tone_default ENUM('auto','friendly','consultative','direct') NULL,
+  touch_number TINYINT NOT NULL,
+  tone_default ENUM('friendly','consultative','direct') NOT NULL,
   locale VARCHAR(8) NOT NULL DEFAULT 'en',
   status ENUM('draft','active','deprecated') NOT NULL DEFAULT 'draft',
   version INT NOT NULL DEFAULT 1,
-  subject VARCHAR(255) NULL,                         -- required at runtime for cadence_email
+  subject VARCHAR(255) NULL,                         -- used when content_kind='cadence_email'
   body MEDIUMTEXT NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_script_templates_unified_slug_ver (template_slug, version),
+  UNIQUE KEY uq_script_templates_unified_key (touch_number, tone_default, content_kind, status),
   KEY idx_stu_kind_touch_status (content_kind, touch_number, status),
   KEY idx_stu_status_slug (status, template_slug)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- PIPELINE CADENCE SCRIPTS (12-step, unified)
+-- PIPELINE CADENCE SCRIPTS (LOCKED CANONICAL)
 -- Seed: 36 scripts (12 steps × 3 tones)
 -- Status: active
+--
+-- IMPORTANT:
+-- Do NOT DELETE then insert, because reruns + unique keys + prior data
+-- can create headaches. Upsert by template_slug instead.
 -- ============================================
 INSERT INTO script_templates_unified
 (template_slug, content_kind, touch_number, tone_default, locale, status, version, subject, body)
 VALUES
-
-('pipeline_step01_voicemail_friendly','voicemail',1,'friendly','en','active',1,NULL,
+-- Step 01 (Voicemail)
+('pipeline_step01_friendly','cadence_voicemail',1,'friendly','en','active',1,NULL,
 'Hi {FirstName}, {YourName} with {FirmName}.\nI work with {Industry} teams when hiring starts to get busy and internal bandwidth gets stretched.\nWanted to reach out and ask a quick question.\nGive me a call back when you have a minute.'),
-('pipeline_step01_voicemail_consultative','voicemail',1,'consultative','en','active',1,NULL,
+('pipeline_step01_consultative','cadence_voicemail',1,'consultative','en','active',1,NULL,
 'Hi {FirstName}, {YourName} with {FirmName}.\nI work with {Industry} and technical teams when hiring becomes a constraint on execution.\nWanted to reach out and ask a quick question.\nGive me a call back when you have a minute.'),
-('pipeline_step01_voicemail_direct','voicemail',1,'direct','en','active',1,NULL,
+('pipeline_step01_direct','cadence_voicemail',1,'direct','en','active',1,NULL,
 'Hi {FirstName}, {YourName} with {FirmName}.\nI work with {Industry} leadership teams when hiring becomes a constraint on performance.\nWanted to reach out with a quick question.\nGive me a call back when you have a minute.'),
 
-('pipeline_step02_email_friendly','cadence_email',2,'friendly','en','active',1,NULL,
-'Subject: Stacey Boyer – Oakway Group\n\nHi {FirstName},\nI tried calling briefly yesterday and wanted to follow up with a quick note.\n\nI’m {YourName} with {FirmName}. We support {Industry} teams when recruiting starts to compete with everything else on their plate.\n\nI had a quick question about how hiring is handled on your side and thought I’d reach out directly.\n\nBest,\n{YourName}'),
-('pipeline_step02_email_consultative','cadence_email',2,'consultative','en','active',1,NULL,
-'Subject: Stacey Boyer – Oakway Group\n\nHi {FirstName},\nI tried calling briefly and wanted to follow up with a quick note.\n\nI’m {YourName} with {FirmName}. We support technical and {Industry} teams when hiring needs start impacting delivery or internal priorities.\n\nI had a question around how recruiting support is handled on your side and thought it made sense to reach out.\n\nBest,\n{YourName}'),
-('pipeline_step02_email_direct','cadence_email',2,'direct','en','active',1,NULL,
-'Subject: Stacey Boyer – Oakway Group\n\nHi {FirstName},\nI tried calling briefly and wanted to follow up with a short note.\n\nI’m {YourName} with {FirmName}. We’re typically brought in when hiring pressure starts impacting execution or leadership bandwidth.\n\nI had a quick question around how recruiting support is handled on your side.\n\nBest,\n{YourName}'),
+-- Step 02 (Email)
+('pipeline_step02_friendly','cadence_email',2,'friendly','en','active',1,'Stacey Boyer – Oakway Group',
+'Hi {FirstName},\nI tried calling briefly yesterday and wanted to follow up with a quick note.\n\nI’m {YourName} with {FirmName}. We support {Industry} teams when recruiting starts to compete with everything else on their plate.\n\nI had a quick question about how hiring is handled on your side and thought I’d reach out directly.\n\nBest,\n{YourName}'),
+('pipeline_step02_consultative','cadence_email',2,'consultative','en','active',1,'Stacey Boyer – Oakway Group',
+'Hi {FirstName},\nI tried calling briefly and wanted to follow up with a quick note.\n\nI’m {YourName} with {FirmName}. We support technical and {Industry} teams when hiring needs start impacting delivery or internal priorities.\n\nI had a question around how recruiting support is handled on your side and thought it made sense to reach out.\n\nBest,\n{YourName}'),
+('pipeline_step02_direct','cadence_email',2,'direct','en','active',1,'Stacey Boyer – Oakway Group',
+'Hi {FirstName},\nI tried calling briefly and wanted to follow up with a short note.\n\nI’m {YourName} with {FirmName}. We’re typically brought in when hiring pressure starts impacting execution or leadership bandwidth.\n\nI had a quick question around how recruiting support is handled on your side.\n\nBest,\n{YourName}'),
 
--- Touch 3: NO VOICEMAIL (sentinel)
-('pipeline_step03_call_friendly','live_script',3,'friendly','en','active',1,NULL,'No Voicemail'),
-('pipeline_step03_call_consultative','live_script',3,'consultative','en','active',1,NULL,'No Voicemail'),
-('pipeline_step03_call_direct','live_script',3,'direct','en','active',1,NULL,'No Voicemail'),
+-- Step 03 (Voicemail: No Voicemail)
+('pipeline_step03_friendly','cadence_voicemail',3,'friendly','en','active',1,NULL,'No Voicemail'),
+('pipeline_step03_consultative','cadence_voicemail',3,'consultative','en','active',1,NULL,'No Voicemail'),
+('pipeline_step03_direct','cadence_voicemail',3,'direct','en','active',1,NULL,'No Voicemail'),
 
-('pipeline_step04_linkedin_friendly','cadence_linkedin_request',4,'friendly','en','active',1,NULL,
+-- Step 04 (LinkedIn)
+('pipeline_step04_friendly','cadence_linkedin',4,'friendly','en','active',1,NULL,
 '{FirstName} — {YourName} with {FirmName}. Thought it’d be good to connect.'),
-('pipeline_step04_linkedin_consultative','cadence_linkedin_request',4,'consultative','en','active',1,NULL,
+('pipeline_step04_consultative','cadence_linkedin',4,'consultative','en','active',1,NULL,
 '{FirstName} — {YourName} with {FirmName}. Thought it’d be good to connect.'),
-('pipeline_step04_linkedin_direct','cadence_linkedin_request',4,'direct','en','active',1,NULL,
+('pipeline_step04_direct','cadence_linkedin',4,'direct','en','active',1,NULL,
 '{FirstName} — {YourName} with {FirmName}.'),
 
-('pipeline_step05_voicemail_friendly','voicemail',5,'friendly','en','active',1,NULL,
+-- Step 05 (Voicemail)
+('pipeline_step05_friendly','cadence_voicemail',5,'friendly','en','active',1,NULL,
 'Hi {FirstName}, {YourName} with {FirmName}.\nReaching out because this is usually when teams loop us in when things start getting busy internally.\nGive me a call back when you have a minute.'),
-('pipeline_step05_voicemail_consultative','voicemail',5,'consultative','en','active',1,NULL,
+('pipeline_step05_consultative','cadence_voicemail',5,'consultative','en','active',1,NULL,
 'Hi {FirstName}, {YourName} with {FirmName}.\nThis is usually when teams reach out once internal recruiting effort starts competing with delivery priorities.\nGive me a call back when you have a minute.'),
-('pipeline_step05_voicemail_direct','voicemail',5,'direct','en','active',1,NULL,
+('pipeline_step05_direct','cadence_voicemail',5,'direct','en','active',1,NULL,
 'Hi {FirstName}, {YourName} with {FirmName}.\nThis is usually when leadership teams loop us in once hiring starts competing with execution.\nGive me a call back when you have a minute.'),
 
-('pipeline_step06_email_friendly','cadence_email',6,'friendly','en','active',1,NULL,
-'Subject: {FirstName} – quick question\n\nHi {FirstName},\nOne of the common reasons teams reach out to us is when recruiting is technically being worked on, but internal capacity makes it hard to keep momentum.\n\nNot sure if that’s relevant right now, but that’s what prompted me to reach out.\n\nI’ll keep trying to connect by phone.\n\nBest,\n{YourName}'),
-('pipeline_step06_email_consultative','cadence_email',6,'consultative','en','active',1,NULL,
-'Subject: {FirstName} – quick question\n\nHi {FirstName},\nWe’re often brought in when teams are actively hiring but internal focus is split across too many priorities to keep roles moving efficiently.\n\nNot sure if that’s the case on your end, but that’s what prompted me to reach out.\n\nI’ll keep trying to connect by phone.\n\nBest,\n{YourName}'),
-('pipeline_step06_email_direct','cadence_email',6,'direct','en','active',1,NULL,
-'Subject: {FirstName} – quick question\n\nHi {FirstName},\nWe’re typically engaged when hiring needs exist, but leadership bandwidth doesn’t allow for prolonged internal search cycles.\n\nNot sure if that’s relevant right now, but that’s what prompted me to reach out.\n\nI’ll keep trying to connect by phone.\n\nBest,\n{YourName}'),
+-- Step 06 (Email)
+('pipeline_step06_friendly','cadence_email',6,'friendly','en','active',1,'{FirstName} – quick question',
+'Hi {FirstName},\nOne of the common reasons teams reach out to us is when recruiting is technically being worked on, but internal capacity makes it hard to keep momentum.\n\nNot sure if that’s relevant right now, but that’s what prompted me to reach out.\n\nI’ll keep trying to connect by phone.\n\nBest,\n{YourName}'),
+('pipeline_step06_consultative','cadence_email',6,'consultative','en','active',1,'{FirstName} – quick question',
+'Hi {FirstName},\nWe’re often brought in when teams are actively hiring but internal focus is split across too many priorities to keep roles moving efficiently.\n\nNot sure if that’s the case on your end, but that’s what prompted me to reach out.\n\nI’ll keep trying to connect by phone.\n\nBest,\n{YourName}'),
+('pipeline_step06_direct','cadence_email',6,'direct','en','active',1,'{FirstName} – quick question',
+'Hi {FirstName},\nWe’re typically engaged when hiring needs exist, but leadership bandwidth doesn’t allow for prolonged internal search cycles.\n\nNot sure if that’s relevant right now, but that’s what prompted me to reach out.\n\nI’ll keep trying to connect by phone.\n\nBest,\n{YourName}'),
 
--- Touch 7: NO VOICEMAIL (sentinel)
-('pipeline_step07_call_friendly','live_script',7,'friendly','en','active',1,NULL,'No Voicemail'),
-('pipeline_step07_call_consultative','live_script',7,'consultative','en','active',1,NULL,'No Voicemail'),
-('pipeline_step07_call_direct','live_script',7,'direct','en','active',1,NULL,'No Voicemail'),
+-- Step 07 (Voicemail: No Voicemail)
+('pipeline_step07_friendly','cadence_voicemail',7,'friendly','en','active',1,NULL,'No Voicemail'),
+('pipeline_step07_consultative','cadence_voicemail',7,'consultative','en','active',1,NULL,'No Voicemail'),
+('pipeline_step07_direct','cadence_voicemail',7,'direct','en','active',1,NULL,'No Voicemail'),
 
-('pipeline_step08_email_friendly','cadence_email',8,'friendly','en','active',1,NULL,
-'Subject: Stacey Boyer\n\nHi {FirstName},\nJust a quick note to put context around the calls.\n\nI work with {Industry} teams on recruiting support when things get busy internally. Wanted to see if it made sense to connect briefly or not.\n\nBest,\n{YourName}'),
-('pipeline_step08_email_consultative','cadence_email',8,'consultative','en','active',1,NULL,
-'Subject: Stacey Boyer\n\nHi {FirstName},\nJust a brief note to add context around the calls.\n\nI work with teams when recruiting effort starts impacting delivery or internal bandwidth. Wanted to see if it made sense to connect or not.\n\nBest,\n{YourName}'),
-('pipeline_step08_email_direct','cadence_email',8,'direct','en','active',1,NULL,
-'Subject: Stacey Boyer\n\nHi {FirstName},\nJust a quick note to put context around the calls.\n\nI work with leadership teams when hiring pressure starts impacting execution. Wanted to see if it made sense to connect briefly.\n\nBest,\n{YourName}'),
+-- Step 08 (LinkedIn)
+('pipeline_step08_friendly','cadence_linkedin',8,'friendly','en','active',1,NULL,
+'Hi {FirstName}, I’ll stop chasing for now. If it ever makes sense to connect about talent strategy or hiring support, we’re here to help.'),
+('pipeline_step08_consultative','cadence_linkedin',8,'consultative','en','active',1,NULL,
+'Hi {FirstName}, I’ll stop chasing for now. If it ever makes sense to connect about talent strategy or hiring support, we’re here to help.'),
+('pipeline_step08_direct','cadence_linkedin',8,'direct','en','active',1,NULL,
+'Hi {FirstName}, I’ll stop chasing for now. If it ever makes sense to connect about talent strategy or hiring support, we’re here to help.'),
 
-('pipeline_step09_voicemail_friendly','voicemail',9,'friendly','en','active',1,NULL,
+-- Step 09 (Voicemail)
+('pipeline_step09_friendly','cadence_voicemail',9,'friendly','en','active',1,NULL,
 'Hi {FirstName}, {YourName} with {FirmName}.\nTrying once more to see if recruiting support is relevant right now or not.\nGive me a call back when you have a minute.'),
-('pipeline_step09_voicemail_consultative','voicemail',9,'consultative','en','active',1,NULL,
+('pipeline_step09_consultative','cadence_voicemail',9,'consultative','en','active',1,NULL,
 'Hi {FirstName}, {YourName} with {FirmName}.\nTrying once more to see if recruiting support is relevant right now or not.\nGive me a call back when you have a minute.'),
-('pipeline_step09_voicemail_direct','voicemail',9,'direct','en','active',1,NULL,
+('pipeline_step09_direct','cadence_voicemail',9,'direct','en','active',1,NULL,
 'Hi {FirstName}, {YourName} with {FirmName}.\nTrying once more to see if recruiting support is relevant right now or not.\nGive me a call back when you have a minute.'),
 
-('pipeline_step10_email_friendly','cadence_email',10,'friendly','en','active',1,NULL,
-'Subject: Following up – Stacey\n\nHi {FirstName},\nI’ve been reaching out because we often get involved when teams are busy and recruiting isn’t getting the attention it needs internally.\n\nIf that’s not relevant right now, no problem at all. I mainly wanted to see if it made sense to talk or if timing just isn’t there.\n\nBest,\n{YourName}'),
-('pipeline_step10_email_consultative','cadence_email',10,'consultative','en','active',1,NULL,
-'Subject: Following up – Stacey\n\nHi {FirstName},\nI’ve been reaching out because we’re typically engaged when hiring pressure starts competing with delivery or internal focus.\n\nIf that’s not relevant right now, no problem. I mainly wanted to confirm whether timing makes sense to talk.\n\nBest,\n{YourName}'),
-('pipeline_step10_email_direct','cadence_email',10,'direct','en','active',1,NULL,
-'Subject: Following up – Stacey\n\nHi {FirstName},\nI’ve been reaching out because we tend to get involved when hiring becomes a leadership-level constraint.\n\nIf that’s not relevant right now, no problem. I mainly wanted clarity on whether timing makes sense.\n\nBest,\n{YourName}'),
+-- Step 10 (Email)
+('pipeline_step10_friendly','cadence_email',10,'friendly','en','active',1,'Following up – Stacey',
+'Hi {FirstName},\nI’ve been reaching out because we often get involved when teams are busy and recruiting isn’t getting the attention it needs internally.\n\nIf that’s not relevant right now, no problem at all. I mainly wanted to see if it made sense to talk or if timing just isn’t there.\n\nBest,\n{YourName}'),
+('pipeline_step10_consultative','cadence_email',10,'consultative','en','active',1,'Following up – Stacey',
+'Hi {FirstName},\nI’ve been reaching out because we’re typically engaged when hiring pressure starts competing with delivery or internal focus.\n\nIf that’s not relevant right now, no problem. I mainly wanted to confirm whether timing makes sense to talk.\n\nBest,\n{YourName}'),
+('pipeline_step10_direct','cadence_email',10,'direct','en','active',1,'Following up – Stacey',
+'Hi {FirstName},\nI’ve been reaching out because we tend to get involved when hiring becomes a leadership-level constraint.\n\nIf that’s not relevant right now, no problem. I mainly wanted clarity on whether timing makes sense.\n\nBest,\n{YourName}'),
 
-('pipeline_step11_call_friendly','live_script',11,'friendly','en','active',1,NULL,'No Voicemail'),
-('pipeline_step11_call_consultative','live_script',11,'consultative','en','active',1,NULL,'No Voicemail'),
-('pipeline_step11_call_direct','live_script',11,'direct','en','active',1,NULL,'No Voicemail'),
+-- Step 11 (Voicemail: No Voicemail)
+('pipeline_step11_friendly','cadence_voicemail',11,'friendly','en','active',1,NULL,'No Voicemail'),
+('pipeline_step11_consultative','cadence_voicemail',11,'consultative','en','active',1,NULL,'No Voicemail'),
+('pipeline_step11_direct','cadence_voicemail',11,'direct','en','active',1,NULL,'No Voicemail'),
 
-('pipeline_step12_email_friendly','cadence_email',12,'friendly','en','active',1,NULL,
-'Subject: Stepping back\n\nHi {FirstName},\nI’m going to step back for now so I don’t keep filling your inbox.\n\nIf recruiting bandwidth becomes an issue down the road and it’s helpful to have an external resource, feel free to reach out.\n\nBest,\n{YourName}'),
-('pipeline_step12_email_consultative','cadence_email',12,'consultative','en','active',1,NULL,
-'Subject: Stepping back\n\nHi {FirstName},\nI’m going to step back for now so I don’t keep reaching out unnecessarily.\n\nIf hiring constraints come back into focus later on, feel free to reach out. Happy to connect when timing makes sense.\n\nBest,\n{YourName}'),
-('pipeline_step12_email_direct','cadence_email',12,'direct','en','active',1,NULL,
-'Subject: Stepping back\n\nHi {FirstName},\nI’m going to step back for now.\n\nIf hiring constraints become relevant later on and it’s useful to have an external option, feel free to reach out.\n\nBest,\n{YourName}');
-
--- -------------------------------------------------------------------
--- NEW: Snapshot backup of unified templates (matches structure)
--- -------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS script_templates_unified_bak_20251102 (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  template_slug VARCHAR(191) NOT NULL,
-  content_kind ENUM(
-    'live_script',
-    'voicemail',
-    'cadence_email',
-    'cadence_linkedin_request',
-    'cadence_linkedin_dm',
-    'cadence_voicemail',
-    'cadence_sms'
-  ) NOT NULL,
-  touch_number TINYINT NULL,
-  tone_default ENUM('auto','friendly','consultative','direct') NULL,
-  locale VARCHAR(8) NOT NULL DEFAULT 'en',
-  status ENUM('draft','active','deprecated') NOT NULL DEFAULT 'draft',
-  version INT NOT NULL DEFAULT 1,
-  subject VARCHAR(255) NULL,
-  body MEDIUMTEXT NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_script_templates_unified_bak_slug_ver (template_slug, version),
-  KEY idx_stu_bak_kind_touch_status (content_kind, touch_number, status),
-  KEY idx_stu_bak_status_slug (status, template_slug)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Step 12 (Email)
+('pipeline_step12_friendly','cadence_email',12,'friendly','en','active',1,'Stepping back',
+'Hi {FirstName},\nI’m going to step back for now so I don’t keep filling your inbox.\n\nIf recruiting bandwidth becomes an issue down the road and it’s helpful to have an external resource, feel free to reach out.\n\nBest,\n{YourName}'),
+('pipeline_step12_consultative','cadence_email',12,'consultative','en','active',1,'Stepping back',
+'Hi {FirstName},\nI’m going to step back for now so I don’t keep reaching out unnecessarily.\n\nIf hiring constraints come back into focus later on, feel free to reach out. Happy to connect when timing makes sense.\n\nBest,\n{YourName}'),
+('pipeline_step12_direct','cadence_email',12,'direct','en','active',1,'Stepping back',
+'Hi {FirstName},\nI’m going to step back for now.\n\nIf hiring constraints become relevant later on and it’s useful to have an external option, feel free to reach out.\n\nBest,\n{YourName}')
+ON DUPLICATE KEY UPDATE
+  content_kind = VALUES(content_kind),
+  touch_number = VALUES(touch_number),
+  tone_default = VALUES(tone_default),
+  locale = VALUES(locale),
+  status = 'active',
+  version = VALUES(version),
+  subject = VALUES(subject),
+  body = VALUES(body);
 
 -- -------------------------------------------------------------------
 -- NEW: Objections & Responses (for live conversations) — 2025-10-26
